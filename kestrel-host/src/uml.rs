@@ -50,7 +50,7 @@ unsafe extern "system" fn veh_handler(exception_info: *mut EXCEPTION_POINTERS) -
 }
 
 /// Run the Kestrel kernel under UML mode.
-pub fn run() -> Result<()> {
+pub fn run(boot_mode: crate::BootMode) -> Result<()> {
     #[cfg(target_os = "windows")]
     {
         info!(
@@ -79,9 +79,26 @@ pub fn run() -> Result<()> {
             bail!("Failed to register VEH handler");
         }
 
-        // Load kernel image into guest memory
-        info!("[UML] Loading Kestrel kernel image...");
-        let entry_offset = crate::loader::load_kernel(host_mem, crate::GUEST_MEMORY_SIZE)?;
+        let entry_offset;
+
+        match &boot_mode {
+            crate::BootMode::Normal | crate::BootMode::SaveOnExit(_) => {
+                info!("[UML] Loading Kestrel kernel image...");
+                entry_offset = crate::loader::load_kernel(host_mem, crate::GUEST_MEMORY_SIZE)?;
+            }
+            crate::BootMode::Snapshot(path) | crate::BootMode::SnapshotAndSave { load: path, .. } => {
+                let (meta, snapshot_mem) = crate::snapshot::load_snapshot(path)?;
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        snapshot_mem.as_ptr(),
+                        host_mem as *mut u8,
+                        snapshot_mem.len(),
+                    );
+                }
+                // In UML mode, we just resume at the RIP saved in the snapshot
+                entry_offset = (meta.cpu.rip - crate::KERNEL_LOAD_ADDR) as usize;
+            }
+        }
 
         // Spawn terminal before jumping to kernel
         info!("[UML] Spawning Kestrel Terminal...");
@@ -102,6 +119,18 @@ pub fn run() -> Result<()> {
         unsafe {
             let _ = RemoveVectoredExceptionHandler(veh_handle);
         }
+
+        match boot_mode {
+            crate::BootMode::SaveOnExit(path) | crate::BootMode::SnapshotAndSave { save: path, .. } => {
+                // In UML mode, we don't have easy access to the guest CPU state
+                // at the exact point of exit unless we captured it in the VEH.
+                // We'll save a default CPU snapshot for now.
+                let cpu = crate::snapshot::CpuSnapshot::default();
+                crate::snapshot::save_snapshot(&path, host_mem as *const u8, cpu, "uml")?;
+            }
+            _ => {}
+        }
+
         info!("[UML] Kernel returned. UML session complete.");
     }
     #[cfg(not(target_os = "windows"))]

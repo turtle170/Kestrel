@@ -34,7 +34,7 @@ pub fn is_whpx_available() -> bool {
 }
 
 /// Run the Kestrel kernel under WHPX.
-pub fn run() -> Result<()> {
+pub fn run(boot_mode: crate::BootMode) -> Result<()> {
     #[cfg(target_os = "windows")]
     {
         info!("[WHPX] Creating hypervisor partition...");
@@ -90,18 +90,40 @@ pub fn run() -> Result<()> {
         }
         .context("Failed to map guest physical memory")?;
 
-        // Load kernel image
-        info!("[WHPX] Loading Kestrel kernel image...");
-        crate::loader::load_kernel(host_mem, crate::GUEST_MEMORY_SIZE)?;
+        let mut load_cpu_snapshot = None;
+
+        match &boot_mode {
+            crate::BootMode::Normal | crate::BootMode::SaveOnExit(_) => {
+                // Load kernel image
+                info!("[WHPX] Loading Kestrel kernel image...");
+                crate::loader::load_kernel(host_mem, crate::GUEST_MEMORY_SIZE)?;
+            }
+            crate::BootMode::Snapshot(path) | crate::BootMode::SnapshotAndSave { load: path, .. } => {
+                let (meta, snapshot_mem) = crate::snapshot::load_snapshot(path)?;
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        snapshot_mem.as_ptr(),
+                        host_mem as *mut u8,
+                        snapshot_mem.len(),
+                    );
+                }
+                load_cpu_snapshot = Some(meta.cpu);
+            }
+        }
 
         // Create virtual processor
         info!("[WHPX] Creating virtual processor 0...");
         unsafe { WHvCreateVirtualProcessor(partition, 0, 0) }
             .context("Failed to create virtual processor")?;
 
-        // Set initial CPU registers
-        info!("[WHPX] Setting initial CPU registers...");
-        setup_vcpu_registers(partition)?;
+        if let Some(cpu) = load_cpu_snapshot {
+            info!("[WHPX] Restoring CPU registers from snapshot...");
+            set_vcpu_registers(partition, &cpu)?;
+        } else {
+            // Set initial CPU registers
+            info!("[WHPX] Setting initial CPU registers...");
+            setup_vcpu_registers(partition)?;
+        }
 
         // Spawn terminal
         info!("[WHPX] Spawning Kestrel Terminal...");
@@ -110,6 +132,14 @@ pub fn run() -> Result<()> {
         // Run execution loop
         info!("[WHPX] Starting Kestrel execution loop...");
         run_loop(partition)?;
+
+        match boot_mode {
+            crate::BootMode::SaveOnExit(path) | crate::BootMode::SnapshotAndSave { save: path, .. } => {
+                let cpu = get_vcpu_registers(partition)?;
+                crate::snapshot::save_snapshot(&path, host_mem as *const u8, cpu, "whpx")?;
+            }
+            _ => {}
+        }
 
         // Cleanup
         unsafe {
@@ -153,6 +183,136 @@ fn setup_vcpu_registers(partition: WHV_PARTITION_HANDLE) -> Result<()> {
     }
     .context("Failed to set vCPU registers")?;
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn set_vcpu_registers(partition: WHV_PARTITION_HANDLE, cpu: &crate::snapshot::CpuSnapshot) -> Result<()> {
+    let reg_names = [
+        WHV_REGISTER_NAME(0x00000040i32), // Rip
+        WHV_REGISTER_NAME(0x00000041i32), // Rflags
+        WHV_REGISTER_NAME(0x00000044i32), // Rsp
+        WHvX64RegisterRax,
+        WHvX64RegisterRbx,
+        WHvX64RegisterRcx,
+        WHvX64RegisterRdx,
+        WHvX64RegisterRsi,
+        WHvX64RegisterRdi,
+        WHvX64RegisterR8,
+        WHvX64RegisterR9,
+        WHvX64RegisterR10,
+        WHvX64RegisterR11,
+        WHvX64RegisterR12,
+        WHvX64RegisterR13,
+        WHvX64RegisterR14,
+        WHvX64RegisterR15,
+        WHvX64RegisterCr0,
+        WHvX64RegisterCr3,
+        WHvX64RegisterCr4,
+        WHvX64RegisterEfer,
+        WHvX64RegisterCs,
+    ];
+    let mut reg_values = [WHV_REGISTER_VALUE::default(); crate::snapshot::SAVED_REG_COUNT];
+
+    unsafe {
+        reg_values[0].Reg64 = cpu.rip;
+        reg_values[1].Reg64 = cpu.rflags;
+        reg_values[2].Reg64 = cpu.rsp;
+        reg_values[3].Reg64 = cpu.rax;
+        reg_values[4].Reg64 = cpu.rbx;
+        reg_values[5].Reg64 = cpu.rcx;
+        reg_values[6].Reg64 = cpu.rdx;
+        reg_values[7].Reg64 = cpu.rsi;
+        reg_values[8].Reg64 = cpu.rdi;
+        reg_values[9].Reg64 = cpu.r8;
+        reg_values[10].Reg64 = cpu.r9;
+        reg_values[11].Reg64 = cpu.r10;
+        reg_values[12].Reg64 = cpu.r11;
+        reg_values[13].Reg64 = cpu.r12;
+        reg_values[14].Reg64 = cpu.r13;
+        reg_values[15].Reg64 = cpu.r14;
+        reg_values[16].Reg64 = cpu.r15;
+        reg_values[17].Reg64 = cpu.cr0;
+        reg_values[18].Reg64 = cpu.cr3;
+        reg_values[19].Reg64 = cpu.cr4;
+        reg_values[20].Reg64 = cpu.efer;
+        // Setting a segment register requires a full segment descriptor
+        // For a snapshot, we do a basic load of the base
+        reg_values[21].Segment.Base = cpu.cs_base;
+
+        WHvSetVirtualProcessorRegisters(
+            partition,
+            0,
+            reg_names.as_ptr(),
+            reg_names.len() as u32,
+            reg_values.as_ptr(),
+        )
+    }
+    .context("Failed to set vCPU registers from snapshot")?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn get_vcpu_registers(partition: WHV_PARTITION_HANDLE) -> Result<crate::snapshot::CpuSnapshot> {
+    let reg_names = [
+        WHV_REGISTER_NAME(0x00000040i32), // Rip
+        WHV_REGISTER_NAME(0x00000041i32), // Rflags
+        WHV_REGISTER_NAME(0x00000044i32), // Rsp
+        WHvX64RegisterRax,
+        WHvX64RegisterRbx,
+        WHvX64RegisterRcx,
+        WHvX64RegisterRdx,
+        WHvX64RegisterRsi,
+        WHvX64RegisterRdi,
+        WHvX64RegisterR8,
+        WHvX64RegisterR9,
+        WHvX64RegisterR10,
+        WHvX64RegisterR11,
+        WHvX64RegisterR12,
+        WHvX64RegisterR13,
+        WHvX64RegisterR14,
+        WHvX64RegisterR15,
+        WHvX64RegisterCr0,
+        WHvX64RegisterCr3,
+        WHvX64RegisterCr4,
+        WHvX64RegisterEfer,
+        WHvX64RegisterCs,
+    ];
+    let mut reg_values = [WHV_REGISTER_VALUE::default(); crate::snapshot::SAVED_REG_COUNT];
+
+    unsafe {
+        WHvGetVirtualProcessorRegisters(
+            partition,
+            0,
+            reg_names.as_ptr(),
+            reg_names.len() as u32,
+            reg_values.as_mut_ptr(),
+        ).context("Failed to get vCPU registers")?;
+    }
+
+    Ok(crate::snapshot::CpuSnapshot {
+        rip: unsafe { reg_values[0].Reg64 },
+        rflags: unsafe { reg_values[1].Reg64 },
+        rsp: unsafe { reg_values[2].Reg64 },
+        rax: unsafe { reg_values[3].Reg64 },
+        rbx: unsafe { reg_values[4].Reg64 },
+        rcx: unsafe { reg_values[5].Reg64 },
+        rdx: unsafe { reg_values[6].Reg64 },
+        rsi: unsafe { reg_values[7].Reg64 },
+        rdi: unsafe { reg_values[8].Reg64 },
+        r8:  unsafe { reg_values[9].Reg64 },
+        r9:  unsafe { reg_values[10].Reg64 },
+        r10: unsafe { reg_values[11].Reg64 },
+        r11: unsafe { reg_values[12].Reg64 },
+        r12: unsafe { reg_values[13].Reg64 },
+        r13: unsafe { reg_values[14].Reg64 },
+        r14: unsafe { reg_values[15].Reg64 },
+        r15: unsafe { reg_values[16].Reg64 },
+        cr0: unsafe { reg_values[17].Reg64 },
+        cr3: unsafe { reg_values[18].Reg64 },
+        cr4: unsafe { reg_values[19].Reg64 },
+        efer: unsafe { reg_values[20].Reg64 },
+        cs_base: unsafe { reg_values[21].Segment.Base },
+    })
 }
 
 #[cfg(target_os = "windows")]

@@ -6,7 +6,7 @@ use crate::pe::PeLoader;
 pub struct KestrelBinfmt;
 
 impl KestrelBinfmt {
-    /// Check if this binary should be handled by Reverse-Proton.
+    /// Check if this binary should be handled by Antiproton.
     pub fn can_handle(data: &[u8]) -> bool {
         PeLoader::is_pe(data)
     }

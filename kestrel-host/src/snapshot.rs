@@ -7,7 +7,7 @@
 //!  then set vCPU registers from metadata before the first run).
 
 use anyhow::{Context, Result, bail};
-use log::{info, warn};
+use log::info;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;

@@ -12,9 +12,9 @@ Write-Host "Building Kestrel IPC Server..." -ForegroundColor Cyan
 Set-Location "$PSScriptRoot\kestrel-ipc"
 cargo build --release
 
-# 3. Build Reverse Proton
-Write-Host "Building Reverse Proton Subsystem..." -ForegroundColor Cyan
-Set-Location "$PSScriptRoot\reverse-proton"
+# 3. Build Antiproton
+Write-Host "Building Antiproton Subsystem..." -ForegroundColor Cyan
+Set-Location "$PSScriptRoot\antiproton"
 cargo build --release
 
 # 4. Build Kestrel Bridge (Linux Kernel Module)

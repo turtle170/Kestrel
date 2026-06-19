@@ -5,7 +5,7 @@ members = [
     "kestrel-ipc",
     "kestrel-term",
     "kestrel-pkg",
-    "reverse-proton",
+    "antiproton", "kestrel-init",
 ]
 resolver = "2"
 
