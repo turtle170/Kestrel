@@ -1,0 +1,12 @@
+[package]
+name = "kestrel-bridge"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "kestrel_bridge"
+crate-type = ["rlib"]
+
+[dependencies]
+log = "0.4"
+byteorder = "1"

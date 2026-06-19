@@ -1,0 +1,16 @@
+[workspace]
+members = [
+    "kestrel-host",
+    "kestrel-bridge",
+    "kestrel-ipc",
+    "kestrel-term",
+    "kestrel-pkg",
+    "reverse-proton",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Kestrel OS Project"]
+license = "Apache-2.0"

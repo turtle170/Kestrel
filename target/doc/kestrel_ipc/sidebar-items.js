@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["KESTREL_NET_PIPE","KESTREL_SERIAL_PIPE"],"enum":["FrameType"],"struct":["IpcFrame","IpcHandle","KestrelIpcServer"]};

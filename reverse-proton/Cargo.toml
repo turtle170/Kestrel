@@ -1,0 +1,12 @@
+[package]
+name = "reverse-proton"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "reverse_proton"
+crate-type = ["rlib"]
+
+[dependencies]
+log = "0.4"
+byteorder = "1"
