@@ -1,1 +1,0 @@
-C:\Users\Account_2\Kestrel\target\debug\kestrel-pkg.exe: C:\Users\Account_2\Kestrel\kestrel-pkg\src\convert.rs C:\Users\Account_2\Kestrel\kestrel-pkg\src\kstl.rs C:\Users\Account_2\Kestrel\kestrel-pkg\src\main.rs

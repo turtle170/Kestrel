@@ -1,9 +1,0 @@
-(function() {
-    const implementors = Object.fromEntries([["kestrel_ipc",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/marker/trait.Send.html\" title=\"trait core::marker::Send\">Send</a> for <a class=\"enum\" href=\"kestrel_ipc/enum.FrameType.html\" title=\"enum kestrel_ipc::FrameType\">FrameType</a>",0,1,["kestrel_ipc::FrameType"]],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/marker/trait.Send.html\" title=\"trait core::marker::Send\">Send</a> for <a class=\"struct\" href=\"kestrel_ipc/struct.IpcFrame.html\" title=\"struct kestrel_ipc::IpcFrame\">IpcFrame</a>",0,1,["kestrel_ipc::IpcFrame"]],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/marker/trait.Send.html\" title=\"trait core::marker::Send\">Send</a> for <a class=\"struct\" href=\"kestrel_ipc/struct.IpcHandle.html\" title=\"struct kestrel_ipc::IpcHandle\">IpcHandle</a>",0,1,["kestrel_ipc::IpcHandle"]],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/marker/trait.Send.html\" title=\"trait core::marker::Send\">Send</a> for <a class=\"struct\" href=\"kestrel_ipc/struct.KestrelIpcServer.html\" title=\"struct kestrel_ipc::KestrelIpcServer\">KestrelIpcServer</a>",0,1,["kestrel_ipc::KestrelIpcServer"]]]]]);
-    if (window.register_implementors) {
-        window.register_implementors(implementors);
-    } else {
-        window.pending_implementors = implementors;
-    }
-})()
-//{"start":59,"fragment_lengths":[1215]}
