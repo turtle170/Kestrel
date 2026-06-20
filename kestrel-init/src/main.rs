@@ -253,7 +253,31 @@ fn spawn_hatchling(req: HatchRequest) -> Result<(), Box<dyn std::error::Error>> 
             let _ = fs::copy(current_exe, &container_kestrel_path);
         }
         
-        for util in &["ls", "cat", "apt"] {
+        let utilities = &[
+            "ls", "cat", "grep", "sed", "awk", "cut", "paste", "join", "sort", "uniq", "wc", "head", 
+            "tail", "tee", "xargs", "tr", "diff", "patch", "cp", "mv", "rm", "mkdir", "rmdir", "touch", 
+            "ln", "pwd", "stat", "chmod", "chown", "chgrp", "dd", "df", "du", "mount", "umount", "fdisk", 
+            "gdisk", "parted", "mkfs", "fsck", "lsblk", "blkid", "uname", "dmesg", "uptime", "hostname", 
+            "lshw", "lspci", "lsusb", "lsmod", "modprobe", "insmod", "rmmod", "sysctl", "ps", "top", 
+            "htop", "atop", "kill", "killall", "pkill", "pgrep", "nice", "renice", "nohup", "bg", "fg", 
+            "jobs", "lsof", "strace", "ltrace", "time", "taskset", "chrt", "unshare", "nsenter", "ip", 
+            "ping", "traceroute", "tracepath", "netstat", "ss", "tcpdump", "nc", "curl", "wget", "iptables", 
+            "nftables", "route", "dig", "nslookup", "arp", "sudo", "su", "whoami", "id", "useradd", 
+            "userdel", "usermod", "groupadd", "groupdel", "passwd", "chage", "groups", "last", "lastb", 
+            "tar", "gzip", "gunzip", "bzip2", "bunzip2", "xz", "unxz", "zstd", "unzstd", "zip", "unzip", 
+            "cpio", "init", "systemctl", "echo", "printf", "less", "more", "clear", "env", "export", 
+            "alias", "unalias", "history", "man", "info", "help", "which", "whereis", "whatis", "file", 
+            "ldd", "nm", "objdump", "readelf", "size", "strip", "make", "gcc", "g++", "clang", "as", 
+            "ld", "gdb", "valgrind", "perf", "git", "ssh", "scp", "rsync", "sftp", "telnet", "ftp", 
+            "screen", "tmux", "watch", "sleep", "date", "cal", "bc", "expr", "seq", "basename", 
+            "dirname", "realpath", "md5sum", "sha1sum", "sha256sum", "base64", "od", "hexdump", "xxd", 
+            "ddrescue", "sync", "chroot", "pivot_root", "capsh", "getcap", "setcap", "getfacl", "setfacl", 
+            "logger", "logrotate", "cron", "crontab", "at", "batch", "wall", "write", "mesg", "talk", 
+            "finger", "w", "who", "users", "tty", "stty", "tput", "reset", "factor", "units", "look", 
+            "fold", "fmt", "pr", "nl", "comm", "tsort", "ptx", "m4", "yes", "true", "false", "test", "["
+        ];
+
+        for util in utilities {
             let link_path = bin_dir.join(util);
             #[cfg(target_os = "linux")]
             {
@@ -264,7 +288,7 @@ fn spawn_hatchling(req: HatchRequest) -> Result<(), Box<dyn std::error::Error>> 
                 let _ = fs::write(&link_path, format!("MOCK_SYM_TO: /bin/kestrel"));
             }
         }
-        println!("[Hatchling] Populated container symlinks: ls, cat, apt -> /bin/kestrel");
+        println!("[Hatchling] Populated container symlinks: 200+ utilities -> /bin/kestrel");
 
         // 5.5 Detect and extract bundled .xshd disks inside the SquashFS
         if let Ok(entries) = fs::read_dir(&lower_dir) {
@@ -404,7 +428,7 @@ fn spawn_hatchling(req: HatchRequest) -> Result<(), Box<dyn std::error::Error>> 
             println!("[Hatchling] [Mock]   - Mount: {}", vol_map);
         }
         println!("[Hatchling] [Mock] Setup overlay filesystem: SquashFS lower + tmpfs upper");
-        println!("[Hatchling] [Mock] Populated container symlinks: ls, cat, apt -> /bin/kestrel");
+        println!("[Hatchling] [Mock] Populated container symlinks: 200+ utilities -> /bin/kestrel");
         println!("[Hatchling] [Mock] Detecting bundled .xshd disks...");
         println!("[Hatchling] Bundled .xshd disk detected: data.xshd");
         println!("[Hatchling] Mounted beak://data.xshd successfully. Free blocks: 2500");

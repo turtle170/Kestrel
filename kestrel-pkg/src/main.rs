@@ -148,20 +148,13 @@ fn main() -> Result<()> {
         .map(|f| f.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    if program_name == "ls" || program_name == "ls.exe" {
-        let path = if args.len() > 1 { &args[1] } else { "." };
-        return run_ls_command(path);
-    } else if program_name == "cat" || program_name == "cat.exe" {
-        let files = if args.len() > 1 { args[1..].to_vec() } else { vec![] };
-        return run_cat_command(&files);
-    } else if program_name == "apt" || program_name == "apt.exe" {
-        if args.len() < 2 {
-            println!("Usage: apt <update | install> [package]");
-            return Ok(());
-        }
-        let action = &args[1];
-        let package = if args.len() > 2 { Some(args[2].as_str()) } else { None };
-        return run_apt_command(action, package);
+    let is_packer = program_name == "kestrel-pkg"
+        || program_name == "kestrel-pkg.exe"
+        || program_name == "kestrel"
+        || program_name == "kestrel.exe";
+
+    if !is_packer {
+        return handle_multi_call(&program_name, &args);
     }
 
     env_logger::Builder::new()
@@ -504,4 +497,186 @@ fn extract_ar(ar_bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>> {
         }
     }
     Ok(files)
+}
+
+fn handle_multi_call(cmd: &str, args: &[String]) -> Result<()> {
+    let cmd_clean = if cmd.ends_with(".exe") {
+        &cmd[..cmd.len() - 4]
+    } else {
+        cmd
+    };
+
+    match cmd_clean {
+        "ls" => {
+            let path = if args.len() > 1 { &args[1] } else { "." };
+            run_ls_command(path)
+        }
+        "cat" => {
+            let files = if args.len() > 1 { args[1..].to_vec() } else { vec![] };
+            run_cat_command(&files)
+        }
+        "apt" => {
+            if args.len() < 2 {
+                println!("Usage: apt <update | install> [package]");
+                return Ok(());
+            }
+            let action = &args[1];
+            let package = if args.len() > 2 { Some(args[2].as_str()) } else { None };
+            run_apt_command(action, package)
+        }
+        "echo" => run_echo(args),
+        "true" => std::process::exit(0),
+        "false" => std::process::exit(1),
+        "pwd" => run_pwd(),
+        "whoami" => run_whoami(),
+        "id" => run_id(),
+        "uname" => run_uname(),
+        "sleep" => run_sleep(args),
+        "clear" => run_clear(),
+        "hostname" => run_hostname(),
+        _ => execute_real_or_suggest(cmd_clean, args),
+    }
+}
+
+fn run_echo(args: &[String]) -> Result<()> {
+    let output = args[1..].join(" ");
+    println!("{}", output);
+    Ok(())
+}
+
+fn run_pwd() -> Result<()> {
+    let cwd = std::env::current_dir().context("Failed to get current directory")?;
+    println!("{}", cwd.display());
+    Ok(())
+}
+
+fn run_whoami() -> Result<()> {
+    println!("root");
+    Ok(())
+}
+
+fn run_id() -> Result<()> {
+    println!("uid=0(root) gid=0(root) groups=0(root)");
+    Ok(())
+}
+
+fn run_uname() -> Result<()> {
+    println!("Linux kestrel 7.0.12-x86_64 #1 SMP PREEMPT Sat Jun 20 12:00:00 UTC 2026 x86_64 GNU/Linux");
+    Ok(())
+}
+
+fn run_sleep(args: &[String]) -> Result<()> {
+    if args.len() < 2 {
+        anyhow::bail!("sleep: missing operand");
+    }
+    let seconds: f64 = args[1].parse().context("sleep: invalid time interval")?;
+    std::thread::sleep(std::time::Duration::from_secs_f64(seconds));
+    Ok(())
+}
+
+fn run_clear() -> Result<()> {
+    print!("\x1B[2J\x1B[1;1H");
+    let _ = std::io::stdout().flush();
+    Ok(())
+}
+
+fn run_hostname() -> Result<()> {
+    println!("kestrel-hatchling");
+    Ok(())
+}
+
+fn execute_real_or_suggest(command: &str, args: &[String]) -> Result<()> {
+    if let Some(real_path) = find_real_executable(command) {
+        let mut child = std::process::Command::new(real_path)
+            .args(&args[1..])
+            .spawn()
+            .context("Failed to spawn real executable")?;
+            
+        let status = child.wait()?;
+        std::process::exit(status.code().unwrap_or(0));
+    }
+    
+    let pkg = suggest_package(command);
+    println!("Command '{}' not found, but can be installed with:", command);
+    println!("  apt install {}", pkg);
+    
+    std::process::exit(127);
+}
+
+fn find_real_executable(command: &str) -> Option<PathBuf> {
+    let path_env = std::env::var("PATH").unwrap_or_default();
+    let separators = if cfg!(windows) { ';' } else { ':' };
+    
+    for path_dir in path_env.split(separators) {
+        for ext in &["", ".exe", ".bat", ".cmd"] {
+            let filename = format!("{}{}", command, ext);
+            let path = Path::new(path_dir).join(&filename);
+            if path.exists() && path.is_file() {
+                // Avoid symlink recursion pointing to kestrel
+                if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+                    if metadata.file_type().is_symlink() {
+                        if let Ok(target) = std::fs::read_link(&path) {
+                            if target.to_string_lossy().contains("kestrel") {
+                                continue;
+                            }
+                        }
+                    }
+                }
+                // Avoid calling ourselves
+                if let Ok(current_exe) = std::env::current_exe() {
+                    if path == current_exe {
+                        continue;
+                    }
+                }
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+fn suggest_package(command: &str) -> &'static str {
+    match command {
+        "grep" | "egrep" | "fgrep" => "grep",
+        "sed" => "sed",
+        "awk" | "gawk" => "gawk",
+        "tar" => "tar",
+        "gzip" | "gunzip" => "gzip",
+        "bzip2" | "bunzip2" => "bzip2",
+        "xz" | "unxz" => "xz-utils",
+        "zstd" | "unzstd" => "zstd",
+        "zip" | "unzip" => "unzip",
+        "curl" => "curl",
+        "wget" => "wget",
+        "git" => "git",
+        "make" => "make",
+        "gcc" => "gcc",
+        "g++" => "g++",
+        "clang" => "clang",
+        "gdb" => "gdb",
+        "tmux" => "tmux",
+        "screen" => "screen",
+        "ping" => "iputils-ping",
+        "ip" => "iproute2",
+        "sudo" => "sudo",
+        "top" | "ps" | "kill" | "killall" | "pkill" | "pgrep" | "free" | "uptime" => "procps",
+        "htop" => "htop",
+        "nc" | "netcat" => "netcat-openbsd",
+        "ss" | "netstat" => "iproute2",
+        "tcpdump" => "tcpdump",
+        "ssh" | "scp" | "sftp" => "openssh-client",
+        "rsync" => "rsync",
+        "nslookup" | "dig" | "host" => "dnsutils",
+        "iptables" => "iptables",
+        "nft" | "nftables" => "nftables",
+        "systemctl" => "systemd",
+        "valgrind" => "valgrind",
+        "perf" => "linux-perf",
+        "strace" => "strace",
+        "ltrace" => "ltrace",
+        "lsof" => "lsof",
+        "cron" | "crontab" => "cron",
+        "chroot" => "coreutils",
+        _ => "coreutils",
+    }
 }
