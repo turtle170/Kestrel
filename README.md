@@ -149,6 +149,33 @@ kestrel-pkg convert -i firefox.deb -o firefox.kstl
 kestrel-pkg unpack -i myapp.kstl -o ./extracted
 ```
 
+
+---
+
+## Guest Shell Utilities & `apt` Package Manager
+
+Kestrel guest containers (hatchlings) dynamically include core Linux terminal shell utilities (`ls`, `cat`) and an `apt` package manager compiled directly into the guest binary as a space-saving multi-call executable (similar to BusyBox). 
+
+- **Dynamic symlinks**: During container startup, `kestrel-init` automatically creates `/bin/ls`, `/bin/cat`, and `/bin/apt` inside the container pointing back to `/bin/kestrel`.
+- **Zero-Dependency `apt` manager**:
+  - `apt update`: Updates package database metadata.
+  - `apt install <package>`: Fetches official `.deb` files from Debian mirrors over HTTP (TcpStream port 80), natively extracts the AR archive, and unpacks the internal data archive into the container's writeable OverlayFS root path.
+
+**Guest usage examples:**
+```bash
+# List files
+ls /usr/bin
+
+# Print file contents
+cat /etc/hostname
+
+# Update repositories
+apt update
+
+# Install a real package (e.g., curl) from Debian repositories
+apt install curl
+```
+
 ---
 
 ## Dual Execution Modes

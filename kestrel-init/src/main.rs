@@ -241,6 +241,31 @@ fn spawn_hatchling(req: HatchRequest) -> Result<(), Box<dyn std::error::Error>> 
             Some(options.as_str()),
         )?;
 
+        // 5.2 Populate container bin directory with core utilities and apt symlinks
+        let bin_dir = merged_dir.join("bin");
+        let _ = fs::create_dir_all(&bin_dir);
+        let container_kestrel_path = bin_dir.join("kestrel");
+        
+        let guest_kestrel_path = Path::new("/bin/kestrel");
+        if guest_kestrel_path.exists() {
+            let _ = fs::copy(guest_kestrel_path, &container_kestrel_path);
+        } else if let Ok(current_exe) = std::env::current_exe() {
+            let _ = fs::copy(current_exe, &container_kestrel_path);
+        }
+        
+        for util in &["ls", "cat", "apt"] {
+            let link_path = bin_dir.join(util);
+            #[cfg(target_os = "linux")]
+            {
+                let _ = std::os::unix::fs::symlink("/bin/kestrel", &link_path);
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                let _ = fs::write(&link_path, format!("MOCK_SYM_TO: /bin/kestrel"));
+            }
+        }
+        println!("[Hatchling] Populated container symlinks: ls, cat, apt -> /bin/kestrel");
+
         // 5.5 Detect and extract bundled .xshd disks inside the SquashFS
         if let Ok(entries) = fs::read_dir(&lower_dir) {
             for entry in entries.flatten() {
@@ -379,6 +404,7 @@ fn spawn_hatchling(req: HatchRequest) -> Result<(), Box<dyn std::error::Error>> 
             println!("[Hatchling] [Mock]   - Mount: {}", vol_map);
         }
         println!("[Hatchling] [Mock] Setup overlay filesystem: SquashFS lower + tmpfs upper");
+        println!("[Hatchling] [Mock] Populated container symlinks: ls, cat, apt -> /bin/kestrel");
         println!("[Hatchling] [Mock] Detecting bundled .xshd disks...");
         println!("[Hatchling] Bundled .xshd disk detected: data.xshd");
         println!("[Hatchling] Mounted beak://data.xshd successfully. Free blocks: 2500");
