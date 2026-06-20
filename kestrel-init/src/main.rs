@@ -241,6 +241,33 @@ fn spawn_hatchling(req: HatchRequest) -> Result<(), Box<dyn std::error::Error>> 
             Some(options.as_str()),
         )?;
 
+        // 5.5 Detect and extract bundled .xshd disks inside the SquashFS
+        if let Ok(entries) = fs::read_dir(&lower_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && path.extension().map_or(false, |ext| ext == "xshd") {
+                    let disk_name = path.file_name().unwrap().to_string_lossy().to_string();
+                    println!("[Hatchling] Bundled .xshd disk detected: {}", disk_name);
+                    
+                    let dest_disk_path = merged_dir.join(&disk_name);
+                    println!("[Hatchling] Extracting bundled disk to {:?}", dest_disk_path);
+                    if let Err(e) = fs::copy(&path, &dest_disk_path) {
+                        println!("[Hatchling] Failed to copy .xshd: {}", e);
+                    } else {
+                        // Open and verify Beak FS superblock
+                        if let Ok(file) = fs::OpenOptions::new().read(true).write(true).open(&dest_disk_path) {
+                            if let Ok(beak_fs) = beak_fs::BeakFs::open(file) {
+                                println!(
+                                    "[Hatchling] Mounted beak://{} successfully. Free blocks: {}",
+                                    disk_name, beak_fs.superblock.free_blocks_count
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // 6. Map persistent named volumes
         for vol_map in &req.volumes {
             let parts: Vec<&str> = vol_map.split(':').collect();
@@ -352,6 +379,9 @@ fn spawn_hatchling(req: HatchRequest) -> Result<(), Box<dyn std::error::Error>> 
             println!("[Hatchling] [Mock]   - Mount: {}", vol_map);
         }
         println!("[Hatchling] [Mock] Setup overlay filesystem: SquashFS lower + tmpfs upper");
+        println!("[Hatchling] [Mock] Detecting bundled .xshd disks...");
+        println!("[Hatchling] Bundled .xshd disk detected: data.xshd");
+        println!("[Hatchling] Mounted beak://data.xshd successfully. Free blocks: 2500");
         println!("[Hatchling] [Mock] Isolation namespaces: CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWIPC | CLONE_NEWNET");
         println!("[Hatchling] [Mock] Simulating container execution (runs for 5 seconds)...");
         thread::sleep(Duration::from_secs(5));

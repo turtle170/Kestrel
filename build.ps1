@@ -31,4 +31,4 @@ if (-Not (Test-Path "linux-source")) {
 Set-Content -Path "linux-source\bzImage" -Value "MOCK_KERNEL_IMAGE"
 
 Write-Host "Build Complete!" -ForegroundColor Green
-Write-Host "Run kestrel-host.exe to start the Kestrel environment." -ForegroundColor Yellow
+Write-Host "Run kestrel.exe to start the Kestrel environment." -ForegroundColor Yellow

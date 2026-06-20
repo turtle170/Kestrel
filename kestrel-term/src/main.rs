@@ -159,7 +159,7 @@ fn run_terminal(mut pipe: std::fs::File) -> Result<()> {
 
 fn run_stub_shell(stdout: &mut impl Write) -> Result<()> {
     writeln!(stdout, "{}",
-        " Kestrel is not running. Start kestrel-host.exe first."
+        " Kestrel is not running. Start kestrel.exe first."
             .with(Color::Yellow)
     )?;
     writeln!(stdout, "{}",
