@@ -64,6 +64,9 @@ Copy-Item "target\release\kestrel-term.exe" -Destination $binDir -Force
 Copy-Item "target\x86_64-unknown-linux-musl\release\kestrel-init" -Destination $binDir -Force
 Copy-Item "target\x86_64-unknown-linux-musl\release\kestrel-pkg" -Destination (Join-Path $binDir "kestrel") -Force
 
+Write-Host "[Installer] Building guest initramfs.cpio with baked symlinks..." -ForegroundColor White
+& "target\release\kestrel-pkg.exe" build-initramfs -i "target\x86_64-unknown-linux-musl\release\kestrel-init" -k "target\x86_64-unknown-linux-musl\release\kestrel-pkg" -o (Join-Path $binDir "initramfs.cpio")
+
 # Copy icon if present
 if (Test-Path "icon.png") {
     Copy-Item "icon.png" -Destination $binDir -Force

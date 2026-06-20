@@ -139,6 +139,18 @@ enum Commands {
         /// Package name
         package: Option<String>,
     },
+    /// Build the guest initramfs CPIO archive with baked symlinks
+    BuildInitramfs {
+        /// Path to the guest kestrel-init binary
+        #[arg(short, long)]
+        init: PathBuf,
+        /// Path to the guest kestrel-pkg binary
+        #[arg(short, long)]
+        kestrel: PathBuf,
+        /// Path to output the initramfs.cpio file
+        #[arg(short, long)]
+        output: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -274,6 +286,69 @@ fn main() -> Result<()> {
         }
         Commands::Apt { action, package } => {
             run_apt_command(&action, package.as_deref())?;
+        }
+        Commands::BuildInitramfs { init, kestrel, output } => {
+            info!("Building guest initramfs CPIO archive at {:?}...", output);
+            let init_bytes = fs::read(&init).context("Failed to read init binary")?;
+            let kestrel_bytes = fs::read(&kestrel).context("Failed to read kestrel binary")?;
+            
+            let f = fs::File::create(&output).context("Failed to create output cpio file")?;
+            let mut w = std::io::BufWriter::new(f);
+            
+            let mtime = 1774000000; // static timestamp
+            let mut ino = 1;
+            
+            // 1. Write directories
+            write_cpio_dir(&mut w, ino, mtime, "bin")?; ino += 1;
+            write_cpio_dir(&mut w, ino, mtime, "sbin")?; ino += 1;
+            write_cpio_dir(&mut w, ino, mtime, "usr")?; ino += 1;
+            write_cpio_dir(&mut w, ino, mtime, "usr/bin")?; ino += 1;
+            write_cpio_dir(&mut w, ino, mtime, "proc")?; ino += 1;
+            write_cpio_dir(&mut w, ino, mtime, "sys")?; ino += 1;
+            write_cpio_dir(&mut w, ino, mtime, "tmp")?; ino += 1;
+            write_cpio_dir(&mut w, ino, mtime, "data")?; ino += 1;
+            
+            // 2. Write init file (PID 1)
+            write_cpio_file(&mut w, ino, 0o755, mtime, "init", &init_bytes)?; ino += 1;
+            
+            // 3. Write kestrel utility binary
+            write_cpio_file(&mut w, ino, 0o755, mtime, "bin/kestrel", &kestrel_bytes)?; ino += 1;
+            
+            // 4. Write all baked symlinks for 200+ utilities
+            let utilities = &[
+                "ls", "cat", "grep", "sed", "awk", "cut", "paste", "join", "sort", "uniq", "wc", "head", 
+                "tail", "tee", "xargs", "tr", "diff", "patch", "cp", "mv", "rm", "mkdir", "rmdir", "touch", 
+                "ln", "pwd", "stat", "chmod", "chown", "chgrp", "dd", "df", "du", "mount", "umount", "fdisk", 
+                "gdisk", "parted", "mkfs", "fsck", "lsblk", "blkid", "uname", "dmesg", "uptime", "hostname", 
+                "lshw", "lspci", "lsusb", "lsmod", "modprobe", "insmod", "rmmod", "sysctl", "ps", "top", 
+                "htop", "atop", "kill", "killall", "pkill", "pgrep", "nice", "renice", "nohup", "bg", "fg", 
+                "jobs", "lsof", "strace", "ltrace", "time", "taskset", "chrt", "unshare", "nsenter", "ip", 
+                "ping", "traceroute", "tracepath", "netstat", "ss", "tcpdump", "nc", "curl", "wget", "iptables", 
+                "nftables", "route", "dig", "nslookup", "arp", "sudo", "su", "whoami", "id", "useradd", 
+                "userdel", "usermod", "groupadd", "groupdel", "passwd", "chage", "groups", "last", "lastb", 
+                "tar", "gzip", "gunzip", "bzip2", "bunzip2", "xz", "unxz", "zstd", "unzstd", "zip", "unzip", 
+                "cpio", "init", "systemctl", "echo", "printf", "less", "more", "clear", "env", "export", 
+                "alias", "unalias", "history", "man", "info", "help", "which", "whereis", "whatis", "file", 
+                "ldd", "nm", "objdump", "readelf", "size", "strip", "make", "gcc", "g++", "clang", "as", 
+                "ld", "gdb", "valgrind", "perf", "git", "ssh", "scp", "rsync", "sftp", "telnet", "ftp", 
+                "screen", "tmux", "watch", "sleep", "date", "cal", "bc", "expr", "seq", "basename", 
+                "dirname", "realpath", "md5sum", "sha1sum", "sha256sum", "base64", "od", "hexdump", "xxd", 
+                "ddrescue", "sync", "chroot", "pivot_root", "capsh", "getcap", "setcap", "getfacl", "setfacl", 
+                "logger", "logrotate", "cron", "crontab", "at", "batch", "wall", "write", "mesg", "talk", 
+                "finger", "w", "who", "users", "tty", "stty", "tput", "reset", "factor", "units", "look", 
+                "fold", "fmt", "pr", "nl", "comm", "tsort", "ptx", "m4", "yes", "true", "false", "test", "["
+            ];
+            
+            for util in utilities {
+                let name = format!("bin/{}", util);
+                write_cpio_symlink(&mut w, ino, mtime, &name, "kestrel")?;
+                ino += 1;
+            }
+            
+            // 5. Write trailer
+            write_cpio_trailer(&mut w, ino, mtime)?;
+            
+            println!("✔  Initramfs cpio created successfully: {:?}", output);
         }
     }
 
@@ -679,4 +754,103 @@ fn suggest_package(command: &str) -> &'static str {
         "chroot" => "coreutils",
         _ => "coreutils",
     }
+}
+
+// ─── CPIO Initramfs Archiver Helpers ─────────────────────────────────────────
+
+fn write_cpio_header<W: std::io::Write>(
+    w: &mut W,
+    ino: u32,
+    mode: u32,
+    uid: u32,
+    gid: u32,
+    nlink: u32,
+    mtime: u32,
+    filesize: u32,
+    name: &str,
+) -> Result<()> {
+    let name_len = name.len() + 1; // including null terminator
+    let header_str = format!(
+        "070701\
+         {:08x}\
+         {:08x}\
+         {:08x}\
+         {:08x}\
+         {:08x}\
+         {:08x}\
+         {:08x}\
+         {:08x}\
+         {:08x}\
+         {:08x}\
+         {:08x}\
+         {:08x}\
+         00000000",
+        ino,
+        mode,
+        uid,
+        gid,
+        nlink,
+        mtime,
+        filesize,
+        3, // dev major
+        1, // dev minor
+        0, // rdev major
+        0, // rdev minor
+        name_len,
+    );
+    w.write_all(header_str.as_bytes())?;
+    w.write_all(name.as_bytes())?;
+    w.write_all(&[0])?;
+    let total_header_len = 110 + name_len;
+    let pad = (4 - (total_header_len % 4)) % 4;
+    w.write_all(&vec![0; pad])?;
+    Ok(())
+}
+
+fn write_cpio_file<W: std::io::Write>(
+    w: &mut W,
+    ino: u32,
+    mode: u32,
+    mtime: u32,
+    name: &str,
+    content: &[u8],
+) -> Result<()> {
+    let full_mode = 0o100000 | mode;
+    write_cpio_header(w, ino, full_mode, 0, 0, 1, mtime, content.len() as u32, name)?;
+    w.write_all(content)?;
+    let pad = (4 - (content.len() % 4)) % 4;
+    w.write_all(&vec![0; pad])?;
+    Ok(())
+}
+
+fn write_cpio_dir<W: std::io::Write>(
+    w: &mut W,
+    ino: u32,
+    mtime: u32,
+    name: &str,
+) -> Result<()> {
+    let full_mode = 0o040000 | 0o755;
+    write_cpio_header(w, ino, full_mode, 0, 0, 2, mtime, 0, name)?;
+    Ok(())
+}
+
+fn write_cpio_symlink<W: std::io::Write>(
+    w: &mut W,
+    ino: u32,
+    mtime: u32,
+    name: &str,
+    target: &str,
+) -> Result<()> {
+    let full_mode = 0o120000 | 0o777;
+    let target_bytes = target.as_bytes();
+    write_cpio_header(w, ino, full_mode, 0, 0, 1, mtime, target_bytes.len() as u32, name)?;
+    w.write_all(target_bytes)?;
+    let pad = (4 - (target_bytes.len() % 4)) % 4;
+    w.write_all(&vec![0; pad])?;
+    Ok(())
+}
+
+fn write_cpio_trailer<W: std::io::Write>(w: &mut W, ino: u32, mtime: u32) -> Result<()> {
+    write_cpio_header(w, ino, 0, 0, 0, 1, mtime, 0, "TRAILER!!!")?;
+    Ok(())
 }

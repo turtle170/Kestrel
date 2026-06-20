@@ -310,6 +310,54 @@ fn spawn_hatchling(req: HatchRequest) -> Result<(), Box<dyn std::error::Error>> 
                                     "[Hatchling] Mounted beak://{} successfully. Free blocks: {}",
                                     disk_name, beak_fs.superblock.free_blocks_count
                                 );
+
+                                // Preconfigure swapfile on the .xshd hard disk
+                                let _ = fs::create_dir_all("/data");
+                                let swapfile_path = Path::new("/data/swapfile");
+                                if !swapfile_path.exists() {
+                                    println!("[Hatchling] Preconfiguring 4GB swapfile on .xshd hard disk (/data/swapfile)...");
+                                    // fallocate or dd to create a 4GB sparse file
+                                    let fallocate_status = std::process::Command::new("fallocate")
+                                        .args(&["-l", "4G", "/data/swapfile"])
+                                        .status();
+                                    
+                                    let success = match fallocate_status {
+                                        Ok(s) if s.success() => true,
+                                        _ => {
+                                            // Fallback to dd if fallocate fails or is not available
+                                            let dd_status = std::process::Command::new("dd")
+                                                .args(&["if=/dev/zero", "of=/data/swapfile", "bs=1M", "count=4096"])
+                                                .status();
+                                            dd_status.map(|s| s.success()).unwrap_or(false)
+                                        }
+                                    };
+
+                                    if success {
+                                        let _ = std::process::Command::new("chmod").args(&["600", "/data/swapfile"]).status();
+                                        let mkswap_status = std::process::Command::new("mkswap").arg("/data/swapfile").status();
+                                        if let Ok(s) = mkswap_status {
+                                            if s.success() {
+                                                println!("[Hatchling] Formatted /data/swapfile as swap.");
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if swapfile_path.exists() {
+                                    let swapon_status = std::process::Command::new("swapon").arg("/data/swapfile").status();
+                                    if let Ok(s) = swapon_status {
+                                        if s.success() {
+                                            println!("[Hatchling] Activated swapfile /data/swapfile (4GB)");
+                                        }
+                                    }
+                                }
+
+                                // Set swappiness to 100
+                                if let Err(e) = fs::write("/proc/sys/vm/swappiness", "100") {
+                                    println!("[Hatchling] Failed to configure vm.swappiness: {}", e);
+                                } else {
+                                    println!("[Hatchling] Configured vm.swappiness = 100 to aggressively swap low-memory apps");
+                                }
                             }
                         }
                     }
@@ -432,6 +480,9 @@ fn spawn_hatchling(req: HatchRequest) -> Result<(), Box<dyn std::error::Error>> 
         println!("[Hatchling] [Mock] Detecting bundled .xshd disks...");
         println!("[Hatchling] Bundled .xshd disk detected: data.xshd");
         println!("[Hatchling] Mounted beak://data.xshd successfully. Free blocks: 2500");
+        println!("[Hatchling] [Mock] Preconfiguring 4GB swapfile on .xshd hard disk (/data/swapfile)...");
+        println!("[Hatchling] [Mock] Activated swapfile /data/swapfile (4GB)");
+        println!("[Hatchling] [Mock] Configured vm.swappiness = 100 to aggressively swap low-memory apps");
         println!("[Hatchling] [Mock] Isolation namespaces: CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWIPC | CLONE_NEWNET");
         println!("[Hatchling] [Mock] Simulating container execution (runs for 5 seconds)...");
         thread::sleep(Duration::from_secs(5));

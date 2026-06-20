@@ -9,7 +9,7 @@ use clap::Parser;
 use log::{info, warn};
 use std::path::PathBuf;
 
-pub const GUEST_MEMORY_SIZE: usize = 256 * 1024 * 1024; // 256 MB
+pub const GUEST_MEMORY_SIZE: usize = 1024 * 1024 * 1024; // 1 GB
 pub const KERNEL_LOAD_ADDR: u64 = 0x100000; // 1 MB physical
 pub const KESTREL_KERNEL_PATH: &str = "kestrel-kernel.bzImage";
 
@@ -71,6 +71,7 @@ fn main() -> Result<()> {
     info!("╔══════════════════════════════════╗");
     info!("║       Kestrel OS Host v0.1       ║");
     info!("╚══════════════════════════════════╝");
+    info!("[Host] Configured guest memory limit: {}MB", GUEST_MEMORY_SIZE / 1024 / 1024);
 
     let args = Args::parse();
 
