@@ -13,7 +13,7 @@ use crossterm::{
     terminal::{self, ClearType},
 };
 use log::{info, warn};
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -122,10 +122,41 @@ fn run_terminal(mut pipe: std::fs::File) -> Result<()> {
     let stdout_clone = stdout.clone();
     let mut pipe_write = pipe.try_clone()?;
 
+    #[cfg(target_os = "windows")]
+    let raw_handle_val = {
+        use std::os::windows::io::AsRawHandle;
+        pipe.as_raw_handle() as isize
+    };
+
     // Reader thread: pipe -> terminal display
     thread::spawn(move || {
         let mut buf = [0u8; 1024];
         loop {
+            #[cfg(target_os = "windows")]
+            {
+                use windows::Win32::System::Pipes::PeekNamedPipe;
+                let handle = windows::Win32::Foundation::HANDLE(raw_handle_val as *mut std::ffi::c_void);
+                let mut total_bytes_avail = 0u32;
+                let res = unsafe {
+                    PeekNamedPipe(
+                        handle,
+                        None,
+                        0,
+                        None,
+                        Some(&mut total_bytes_avail),
+                        None,
+                    )
+                };
+                if res.is_err() {
+                    break;
+                }
+                if total_bytes_avail == 0 {
+                    thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+            }
+
+            use std::io::Read;
             match pipe.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
