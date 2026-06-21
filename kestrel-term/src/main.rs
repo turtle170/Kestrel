@@ -172,7 +172,10 @@ fn run_terminal(mut pipe: std::fs::File) -> Result<()> {
     // Main thread: keyboard -> pipe
     loop {
         if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(KeyEvent { code, modifiers, .. }) = event::read()? {
+            if let Event::Key(KeyEvent { code, modifiers, kind, .. }) = event::read()? {
+                if kind == event::KeyEventKind::Release {
+                    continue;
+                }
                 // Ctrl+Q to quit
                 if code == KeyCode::Char('q') && modifiers.contains(KeyModifiers::CONTROL) {
                     break;
