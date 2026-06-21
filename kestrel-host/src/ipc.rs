@@ -45,13 +45,13 @@ pub fn spawn_terminal() {
 
 /// Handle an I/O port access exit delivered by the WHPX virtual processor.
 #[cfg(target_os = "windows")]
-pub fn handle_io_port(ctx: WHV_X64_IO_PORT_ACCESS_CONTEXT) {
+pub fn handle_io_port(ctx: WHV_X64_IO_PORT_ACCESS_CONTEXT) -> Option<u32> {
     let port = ctx.PortNumber;
 
     match port {
-        // COM1 UART data register — route serial output to Kestrel terminal pipe
+        // COM1 UART data register
         0x3F8 => {
-            let is_write = (unsafe { ctx.AccessInfo.AsUINT32 } & 0x20) != 0;
+            let is_write = (unsafe { ctx.AccessInfo.AsUINT32 } & 0x01) != 0;
             if is_write {
                 let byte = (ctx.Rax & 0xFF) as u8;
                 let mut written = false;
@@ -69,19 +69,45 @@ pub fn handle_io_port(ctx: WHV_X64_IO_PORT_ACCESS_CONTEXT) {
                 } else {
                     std::thread::sleep(std::time::Duration::from_millis(5));
                 }
+                None
+            } else {
+                // Read from serial buffer
+                let mut byte = 0u8;
+                if let Ok(mut queue) = SERIAL_INPUT_QUEUE.lock() {
+                    if !queue.is_empty() {
+                        byte = queue.remove(0);
+                    }
+                }
+                Some(byte as u32)
+            }
+        }
+        // COM1 Line Status Register (LSR)
+        0x3FD => {
+            let is_write = (unsafe { ctx.AccessInfo.AsUINT32 } & 0x01) != 0;
+            if !is_write {
+                let mut status = 0x60u8; // Transmitter empty (ready to write)
+                if let Ok(queue) = SERIAL_INPUT_QUEUE.lock() {
+                    if !queue.is_empty() {
+                        status |= 0x01; // Data Ready (ready to read)
+                    }
+                }
+                Some(status as u32)
+            } else {
+                None
             }
         }
         // ISA debug port — safe to ignore
-        0x0080 => {}
+        0x0080 => { None }
         _ => {
             debug!("[IPC] Unhandled I/O port 0x{:04x}", port);
+            None
         }
     }
 }
 
 // Non-Windows stub so the module compiles on all targets
 #[cfg(not(target_os = "windows"))]
-pub fn handle_io_port(_ctx: ()) {}
+pub fn handle_io_port(_ctx: ()) -> Option<u32> { None }
 
 // ─── UML MMIO Handler ────────────────────────────────────────────────────────
 
@@ -285,6 +311,7 @@ pub fn start_control_listener() {
 // ─── Serial Named Pipe Server ────────────────────────────────────────────────
 
 static SERIAL_PIPE_STREAM: std::sync::Mutex<Option<std::fs::File>> = std::sync::Mutex::new(None);
+static SERIAL_INPUT_QUEUE: std::sync::Mutex<Vec<u8>> = std::sync::Mutex::new(Vec::new());
 
 #[cfg(target_os = "windows")]
 pub fn start_serial_server() {
@@ -330,7 +357,11 @@ pub fn start_serial_server() {
                         use std::io::Read;
                         match file_read.read(&mut buf) {
                             Ok(0) => break,
-                            Ok(_) => {}
+                            Ok(n) => {
+                                if let Ok(mut queue) = SERIAL_INPUT_QUEUE.lock() {
+                                    queue.extend_from_slice(&buf[..n]);
+                                }
+                            }
                             Err(_) => break,
                         }
                     }

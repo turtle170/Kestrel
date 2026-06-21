@@ -339,7 +339,11 @@ fn run_loop(partition: WHV_PARTITION_HANDLE) -> Result<()> {
             }
             WHvRunVpExitReasonX64IoPortAccess => {
                 let io_context = unsafe { exit_context.Anonymous.IoPortAccess };
-                crate::ipc::handle_io_port(io_context);
+                if let Some(val) = crate::ipc::handle_io_port(io_context) {
+                    let mut rax = get_register(partition, WHvX64RegisterRax)?;
+                    rax = (rax & !0xFF) | (val as u64 & 0xFF);
+                    set_register(partition, WHvX64RegisterRax, rax)?;
+                }
 
                 // Advance RIP to skip the emulated instruction
                 let mut rip = get_register(partition, WHvX64RegisterRip)?;

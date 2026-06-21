@@ -33,16 +33,24 @@ pub fn load_kernel(guest_mem: *mut std::ffi::c_void, guest_mem_size: usize) -> R
         // mov dx, 0x3F8
         stub.extend_from_slice(&[0xBA, 0xF8, 0x03]);
         
-        let msg = b"Kestrel OS Stub Mode (No Kernel Image). Press Ctrl+Q to exit.\r\n";
+        let msg = b"Kestrel OS Stub Mode (No Kernel Image). Type anything to echo. Press Ctrl+Q to exit.\r\n";
         for &byte in msg {
             // mov al, byte
             stub.extend_from_slice(&[0xB0, byte]);
             // out dx, al
             stub.push(0xEE);
         }
-        // jmp loop (relative offset: 1 - stub.len())
-        let rel = (1 - (stub.len() as isize)) as u8;
-        stub.extend_from_slice(&[0xEB, rel]);
+        // Echo loop
+        stub.extend_from_slice(&[
+            0xBA, 0xFD, 0x03, // mov dx, 0x3FD
+            0xEC,             // in al, dx
+            0xA8, 0x01,       // test al, 0x01
+            0x74, 0xF9,       // jz wait_rx (jump to in al, dx)
+            0xBA, 0xF8, 0x03, // mov dx, 0x3F8
+            0xEC,             // in al, dx
+            0xEE,             // out dx, al
+            0xEB, 0xF1,       // jmp echo_loop (jump to mov dx, 0x3FD)
+        ]);
         
         if offset + stub.len() > guest_mem_size {
             bail!("Loader stub exceeds guest memory size");
