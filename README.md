@@ -38,7 +38,7 @@ Kestrel boots in milliseconds and relies on Windows for graphics, networking, an
 
 ## Installation
 
-Kestrel OS comes with an automated installation script for Windows (PowerShell 7). Open PowerShell as administrator and run:
+Kestrel OS comes with an automated installation script for Windows (PowerShell 7) that fetches precompiled release binaries directly from GitHub, bypassing local Rust/Cargo compiler requirements. Open PowerShell as administrator and run:
 
 ```powershell
 irm https://raw.githubusercontent.com/turtle170/Kestrel/master/install.ps1 | iex
@@ -46,11 +46,14 @@ irm https://raw.githubusercontent.com/turtle170/Kestrel/master/install.ps1 | iex
 
 This installer will automatically:
 1. Clone the repository into `D:\Kestrel` (or fall back to your user folder if `D:` is missing).
-2. Install the static Linux musl target for guest compilation.
-3. Build the entire Kestrel environment (both Windows host and guest components).
-4. Update your User PATH so that `kestrel` and `kestrel-pkg` can be called from anywhere.
+2. Fetch the precompiled release binaries (`kestrel.exe`, `kestrel-pkg.exe`, `kestrel-term.exe`, `initramfs.cpio`, `kestrel`, `kestrel-init`) from the latest GitHub release.
+3. Update your User PATH so that `kestrel` and `kestrel-pkg` can be called from anywhere.
+
+> [!NOTE]
+> For details on building Kestrel from source, configuring targets, or setting up the local workspace, see the [CLI Reference](file:///c:/Users/Account_2/Kestrel/CLI.md).
 
 ---
+
 
 ## Components
 
@@ -100,6 +103,8 @@ Kestrel features a custom filesystem named **Beak FS** and a custom virtual hard
 
 * **Sparse Disk Storage (.xshd)**: Initialized as Windows-native sparse files (using `FSCTL_SET_SPARSE`), meaning unused blocks consume 0MB of physical disk space. They are page-aligned to 4KB blocks to optimize virtualized I/O.
 * **Auto-extraction & Mounting**: `.xshd` virtual disk images can be bundled directly inside `.kstl` application packages. At container startup, the `kestrel-init` guest daemon automatically copies them to writeable persistent storage and mounts them.
+* **4GB Preconfigured Swapfile**: Upon mounting the disk in guest mode, `kestrel-init` automatically allocates a 4GB swapfile on the `.xshd` volume and sets `vm.swappiness = 100` to aggressively page low-memory applications out of active RAM.
+* **1GB Memory Cap**: The virtual machine is configured with a strict 1GB guest memory allocation (`GUEST_MEMORY_SIZE`), optimized for memory-restricted and micro-service testing.
 * **Ultralight Metadata**: Uses a custom flat directory structure (32-byte entries) and lightweight inode allocation (128-byte inodes, 12 direct + 1 single indirect block pointer supporting file sizes up to ~2.04MB).
 
 Manage disks on the host using `kestrel-pkg` (or `kestrel` inside the guest):
@@ -152,29 +157,25 @@ kestrel-pkg unpack -i myapp.kstl -o ./extracted
 
 ---
 
-## Guest Shell Utilities & `apt` Package Manager
+## Guest Shell Utilities & Package Managers (`apt`, `dnf`, `pacman`)
 
-Kestrel guest containers (hatchlings) dynamically include core Linux terminal shell utilities (`ls`, `cat`) and an `apt` package manager compiled directly into the guest binary as a space-saving multi-call executable (similar to BusyBox). 
+Kestrel guest containers (hatchlings) dynamically bundle core Linux terminal shell utilities and a suite of lightweight guest package managers (`apt`, `dnf`, `pacman`) compiled into the guest binary as a space-saving multi-call executable (similar to BusyBox).
 
-- **Dynamic symlinks**: During container startup, `kestrel-init` automatically creates `/bin/ls`, `/bin/cat`, and `/bin/apt` inside the container pointing back to `/bin/kestrel`.
-- **Zero-Dependency `apt` manager**:
-  - `apt update`: Updates package database metadata.
-  - `apt install <package>`: Fetches official `.deb` files from Debian mirrors over HTTP (TcpStream port 80), natively extracts the AR archive, and unpacks the internal data archive into the container's writeable OverlayFS root path.
+* **Pre-Baked CPIO Symlinks**: All 200+ command symlinks (like `/bin/ls`, `/bin/cat`, `/bin/apt`, `/bin/dnf`, `/bin/pacman`) are baked directly into the `initramfs.cpio` filesystem at build time via `kestrel-pkg build-initramfs`, eliminating boot-time setup delays.
+* **Apt (Debian)**: Zero-dependency downloader. Downloads `.deb` packages over HTTP, extracts AR archives, and copies the payload to the container root.
+* **Dnf (Fedora)**: Simulates repository cache update (`dnf update` / `dnf makecache`) and extracts Fedora `.rpm` packages via built-in `rpm2cpio` emulation.
+* **Pacman (Arch)**: Simulates package database synchronization (`pacman -Sy`) and extracts Arch `.pkg.tar.zst` packages via `tar` into the container root.
+* **Offline Mock Fallbacks**: When internet connection or package mirrors are unreachable, guest package managers gracefully fall back to creating mock executable stubs inside `/usr/bin/` to prevent pipeline blocks.
+* **Multi-Suggestion Engine**: If an uninstalled command is executed, Kestrel prints suggestions for all three managers:
+  ```bash
+  $ wget
+  Command 'wget' not found, but can be installed with:
+    apt install wget
+    dnf install wget
+    pacman -S wget
+  ```
 
-**Guest usage examples:**
-```bash
-# List files
-ls /usr/bin
-
-# Print file contents
-cat /etc/hostname
-
-# Update repositories
-apt update
-
-# Install a real package (e.g., curl) from Debian repositories
-apt install curl
-```
+For more command examples and the full CLI list, refer to the [CLI Reference](file:///c:/Users/Account_2/Kestrel/CLI.md).
 
 ---
 
