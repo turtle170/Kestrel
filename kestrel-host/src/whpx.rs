@@ -347,7 +347,9 @@ fn run_loop(partition: WHV_PARTITION_HANDLE) -> Result<()> {
 
                 // Advance RIP to skip the emulated instruction
                 let mut rip = get_register(partition, WHvX64RegisterRip)?;
-                rip += (exit_context.VpContext._bitfield & 0x0F) as u64;
+                let len = (exit_context.VpContext._bitfield & 0x0F) as u64;
+                debug!("[WHPX] IoPortAccess exit: RIP=0x{:x}, instruction len={}, new RIP=0x{:x}", rip, len, rip + len);
+                rip += len;
                 set_register(partition, WHvX64RegisterRip, rip)?;
             }
             WHvRunVpExitReasonMemoryAccess => {

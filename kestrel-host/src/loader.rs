@@ -45,7 +45,7 @@ pub fn load_kernel(guest_mem: *mut std::ffi::c_void, guest_mem_size: usize) -> R
             0xBA, 0xFD, 0x03, // mov dx, 0x3FD
             0xEC,             // in al, dx
             0xA8, 0x01,       // test al, 0x01
-            0x74, 0xF9,       // jz wait_rx (jump to in al, dx)
+            0x74, 0xFB,       // jz wait_rx (jump to in al, dx)
             0xBA, 0xF8, 0x03, // mov dx, 0x3F8
             0xEC,             // in al, dx
             0xEE,             // out dx, al

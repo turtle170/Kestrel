@@ -54,10 +54,11 @@ pub fn handle_io_port(ctx: WHV_X64_IO_PORT_ACCESS_CONTEXT) -> Option<u32> {
             let is_write = (unsafe { ctx.AccessInfo.AsUINT32 } & 0x01) != 0;
             if is_write {
                 let byte = (ctx.Rax & 0xFF) as u8;
+                info!("[IPC] COM1 TX: '{}' ({})", byte as char, byte);
                 let mut written = false;
                 if let Ok(mut guard) = SERIAL_PIPE_STREAM.lock() {
                     if let Some(ref mut file) = *guard {
-                        if file.write_all(&[byte]).is_ok() && file.flush().is_ok() {
+                        if file.write_all(&[byte]).is_ok() {
                             written = true;
                         }
                     }
@@ -317,7 +318,7 @@ static SERIAL_INPUT_QUEUE: std::sync::Mutex<Vec<u8>> = std::sync::Mutex::new(Vec
 pub fn start_serial_server() {
     thread::spawn(|| {
         use windows::core::HSTRING;
-        use windows::Win32::System::Pipes::{CreateNamedPipeW, PIPE_TYPE_BYTE, PIPE_READMODE_BYTE, PIPE_WAIT, ConnectNamedPipe, DisconnectNamedPipe};
+        use windows::Win32::System::Pipes::{CreateNamedPipeW, PIPE_TYPE_BYTE, PIPE_READMODE_BYTE, PIPE_WAIT, ConnectNamedPipe, DisconnectNamedPipe, PeekNamedPipe};
         use windows::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
         use windows::Win32::Foundation::{GetLastError, ERROR_PIPE_CONNECTED};
         use std::os::windows::io::FromRawHandle;
@@ -354,6 +355,23 @@ pub fn start_serial_server() {
                     let mut file_read = file;
                     let mut buf = [0u8; 1024];
                     loop {
+                        let mut total_bytes_avail = 0u32;
+                        let res = PeekNamedPipe(
+                            pipe,
+                            None,
+                            0,
+                            None,
+                            Some(&mut total_bytes_avail),
+                            None,
+                        );
+                        if res.is_err() {
+                            break;
+                        }
+                        if total_bytes_avail == 0 {
+                            thread::sleep(std::time::Duration::from_millis(10));
+                            continue;
+                        }
+                        
                         use std::io::Read;
                         match file_read.read(&mut buf) {
                             Ok(0) => break,
