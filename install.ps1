@@ -3,9 +3,9 @@
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "╔══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-Write-Host "║                    Installing Kestrel OS                     ║" -ForegroundColor Cyan
-Write-Host "╚══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host "================================================================" -ForegroundColor Cyan
+Write-Host "                     Installing Kestrel OS                      " -ForegroundColor Cyan
+Write-Host "================================================================" -ForegroundColor Cyan
 
 # 1. Determine Target Directory
 $installDir = "D:\Kestrel"
@@ -69,7 +69,7 @@ if (Test-Path "icon.png") {
 # 6. Add to user Path
 Write-Host "[Installer] Updating User Environment PATH..." -ForegroundColor White
 $userPath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::User)
-if ($userPath -notsplit ';' -contains $binDir) {
+if (($userPath -split ';') -contains $binDir) {
     Write-Host "[Installer] PATH already contains Kestrel." -ForegroundColor Green
 } else {
     $newUserPath = $userPath + ";$binDir"
@@ -80,7 +80,7 @@ if ($userPath -notsplit ';' -contains $binDir) {
 
 Pop-Location
 
-Write-Host "`n🎉 Kestrel OS installed successfully at $installDir!" -ForegroundColor Green
+Write-Host "`n[Success] Kestrel OS installed successfully at $installDir!" -ForegroundColor Green
 Write-Host "Open a new terminal session and run:" -ForegroundColor White
 Write-Host "  kestrel --help" -ForegroundColor Cyan
 Write-Host "  kestrel-pkg --help" -ForegroundColor Cyan
