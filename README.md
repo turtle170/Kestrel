@@ -41,7 +41,7 @@ Kestrel boots in milliseconds and relies on Windows for graphics, networking, an
 Kestrel OS comes with an automated installation script for Windows (PowerShell 7). Open PowerShell as administrator and run:
 
 ```powershell
-irm https://raw.githubusercontent.com/turtle170/Kestrel/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/turtle170/Kestrel/master/install.ps1 | iex
 ```
 
 This installer will automatically:

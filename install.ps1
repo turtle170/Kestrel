@@ -1,5 +1,5 @@
 # Kestrel OS Installer for Windows
-# Usage: irm https://raw.githubusercontent.com/turtle170/Kestrel/main/install.ps1 | iex
+# Usage: irm https://raw.githubusercontent.com/turtle170/Kestrel/master/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
