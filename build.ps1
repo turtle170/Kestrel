@@ -29,10 +29,8 @@ cargo build --release -p kestrel-pkg
 cargo build --release -p kestrel-term
 
 rustup target add x86_64-unknown-linux-musl
-$env:RUSTFLAGS="-C linker-flavor=ld.lld -C linker=rust-lld"
 cargo build --release --target x86_64-unknown-linux-musl -p kestrel-init
 cargo build --release --target x86_64-unknown-linux-musl -p kestrel-pkg
-$env:RUSTFLAGS=""
 
 # 6. Populate bin directory and build initramfs
 $binDir = Join-Path $PSScriptRoot "bin"
