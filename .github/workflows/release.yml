@@ -1,0 +1,85 @@
+name: Release Build
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Kestrel Release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Cache Cargo Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build Host and Windows Tools
+        run: cargo build --release --workspace --exclude kestrel-init --exclude kestrel-bridge --exclude beak-fs
+
+      - name: Build Guest Utilities
+        run: |
+          cargo build --release --target x86_64-unknown-linux-musl -p kestrel-init
+          cargo build --release --target x86_64-unknown-linux-musl -p kestrel-pkg
+
+      - name: Build initramfs.cpio
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+          Copy-Item target\release\kestrel.exe -Destination bin\ -Force
+          Copy-Item target\release\kestrel-pkg.exe -Destination bin\ -Force
+          Copy-Item target\release\kestrel-term.exe -Destination bin\ -Force
+          Copy-Item target\x86_64-unknown-linux-musl\release\kestrel-init -Destination bin\ -Force
+          Copy-Item target\x86_64-unknown-linux-musl\release\kestrel-pkg -Destination bin\kestrel -Force
+          & bin\kestrel-pkg.exe build-initramfs -i bin\kestrel-init -k bin\kestrel -o bin\initramfs.cpio
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kestrel-binaries
+          path: bin/
+
+      - name: Create or Update latest Pre-Release
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Kestrel Latest Pre-Release
+          body: |
+            Automatically compiled Kestrel OS binaries from the latest commit on `master`.
+            
+            Install using:
+            `irm https://raw.githubusercontent.com/${{ github.repository }}/master/install.ps1 | iex`
+          draft: false
+          prerelease: true
+          files: |
+            bin/kestrel.exe
+            bin/kestrel-pkg.exe
+            bin/kestrel-term.exe
+            bin/initramfs.cpio
+            bin/kestrel
+            bin/kestrel-init
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

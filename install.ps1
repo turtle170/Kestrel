@@ -20,10 +20,6 @@ $gitCheck = Get-Command git -ErrorAction SilentlyContinue
 if (-not $gitCheck) {
     Write-Error "Git is required to install Kestrel OS. Please install Git and try again."
 }
-$cargoCheck = Get-Command cargo -ErrorAction SilentlyContinue
-if (-not $cargoCheck) {
-    Write-Error "Rust/Cargo is required to compile Kestrel OS. Please install rustup (https://rustup.rs) and try again."
-}
 
 # 3. Clone / Update Repository
 if (Test-Path $installDir) {
@@ -36,36 +32,34 @@ if (Test-Path $installDir) {
     git clone https://github.com/turtle170/Kestrel.git $installDir
 }
 
-# 4. Compile Binaries
+# 4. Fetch Precompiled Binaries from GitHub
 Push-Location $installDir
-
-Write-Host "[Installer] Adding target 'x86_64-unknown-linux-musl' for guest kernel..." -ForegroundColor White
-rustup target add x86_64-unknown-linux-musl
-
-Write-Host "[Installer] Building Kestrel Linux guest utilities..." -ForegroundColor White
-$env:RUSTFLAGS="-C linker-flavor=ld.lld -C linker=rust-lld"
-cargo build --release --target x86_64-unknown-linux-musl -p kestrel-init
-cargo build --release --target x86_64-unknown-linux-musl -p kestrel-pkg
-$env:RUSTFLAGS=""
-
-Write-Host "[Installer] Building Kestrel Windows host and tools..." -ForegroundColor White
-cargo build --release --workspace --exclude kestrel-init --exclude kestrel-bridge --exclude beak-fs
-
-# 5. Populate Bin Directory
 $binDir = Join-Path $installDir "bin"
 if (-not (Test-Path $binDir)) {
     New-Item -ItemType Directory -Path $binDir | Out-Null
 }
 
-Write-Host "[Installer] Installing binaries..." -ForegroundColor White
-Copy-Item "target\release\kestrel.exe" -Destination $binDir -Force
-Copy-Item "target\release\kestrel-pkg.exe" -Destination $binDir -Force
-Copy-Item "target\release\kestrel-term.exe" -Destination $binDir -Force
-Copy-Item "target\x86_64-unknown-linux-musl\release\kestrel-init" -Destination $binDir -Force
-Copy-Item "target\x86_64-unknown-linux-musl\release\kestrel-pkg" -Destination (Join-Path $binDir "kestrel") -Force
+$repoUrl = "https://github.com/turtle170/Kestrel/releases/download/latest"
+$filesToDownload = @(
+    "kestrel.exe",
+    "kestrel-pkg.exe",
+    "kestrel-term.exe",
+    "initramfs.cpio",
+    "kestrel",
+    "kestrel-init"
+)
 
-Write-Host "[Installer] Building guest initramfs.cpio with baked symlinks..." -ForegroundColor White
-& "target\release\kestrel-pkg.exe" build-initramfs -i "target\x86_64-unknown-linux-musl\release\kestrel-init" -k "target\x86_64-unknown-linux-musl\release\kestrel-pkg" -o (Join-Path $binDir "initramfs.cpio")
+Write-Host "[Installer] Downloading precompiled Kestrel release binaries..." -ForegroundColor White
+foreach ($file in $filesToDownload) {
+    $source = "$repoUrl/$file"
+    $dest = Join-Path $binDir $file
+    Write-Host "[Installer] Downloading $file..." -ForegroundColor Gray
+    try {
+        Invoke-WebRequest -Uri $source -OutFile $dest -UseBasicParsing
+    } catch {
+        Write-Error "Failed to download $file from $source. Please check your internet connection."
+    }
+}
 
 # Copy icon if present
 if (Test-Path "icon.png") {

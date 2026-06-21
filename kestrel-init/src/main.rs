@@ -254,7 +254,7 @@ fn spawn_hatchling(req: HatchRequest) -> Result<(), Box<dyn std::error::Error>> 
         }
         
         let utilities = &[
-            "ls", "cat", "grep", "sed", "awk", "cut", "paste", "join", "sort", "uniq", "wc", "head", 
+            "apt", "dnf", "pacman", "ls", "cat", "grep", "sed", "awk", "cut", "paste", "join", "sort", "uniq", "wc", "head", 
             "tail", "tee", "xargs", "tr", "diff", "patch", "cp", "mv", "rm", "mkdir", "rmdir", "touch", 
             "ln", "pwd", "stat", "chmod", "chown", "chgrp", "dd", "df", "du", "mount", "umount", "fdisk", 
             "gdisk", "parted", "mkfs", "fsck", "lsblk", "blkid", "uname", "dmesg", "uptime", "hostname", 

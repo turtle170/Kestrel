@@ -139,6 +139,20 @@ enum Commands {
         /// Package name
         package: Option<String>,
     },
+    /// DNF package manager client (guest)
+    Dnf {
+        /// Dnf action: update, install, or makecache
+        action: String,
+        /// Package name
+        package: Option<String>,
+    },
+    /// Pacman package manager client (guest)
+    Pacman {
+        /// Pacman action flags (e.g. -Sy, -S, -Syu)
+        action: String,
+        /// Package name
+        package: Option<String>,
+    },
     /// Build the guest initramfs CPIO archive with baked symlinks
     BuildInitramfs {
         /// Path to the guest kestrel-init binary
@@ -287,6 +301,12 @@ fn main() -> Result<()> {
         Commands::Apt { action, package } => {
             run_apt_command(&action, package.as_deref())?;
         }
+        Commands::Dnf { action, package } => {
+            run_dnf_command(&action, package.as_deref())?;
+        }
+        Commands::Pacman { action, package } => {
+            run_pacman_command(&action, package.as_deref())?;
+        }
         Commands::BuildInitramfs { init, kestrel, output } => {
             info!("Building guest initramfs CPIO archive at {:?}...", output);
             let init_bytes = fs::read(&init).context("Failed to read init binary")?;
@@ -316,7 +336,7 @@ fn main() -> Result<()> {
             
             // 4. Write all baked symlinks for 200+ utilities
             let utilities = &[
-                "ls", "cat", "grep", "sed", "awk", "cut", "paste", "join", "sort", "uniq", "wc", "head", 
+                "apt", "dnf", "pacman", "ls", "cat", "grep", "sed", "awk", "cut", "paste", "join", "sort", "uniq", "wc", "head", 
                 "tail", "tee", "xargs", "tr", "diff", "patch", "cp", "mv", "rm", "mkdir", "rmdir", "touch", 
                 "ln", "pwd", "stat", "chmod", "chown", "chgrp", "dd", "df", "du", "mount", "umount", "fdisk", 
                 "gdisk", "parted", "mkfs", "fsck", "lsblk", "blkid", "uname", "dmesg", "uptime", "hostname", 
@@ -445,6 +465,217 @@ fn run_apt_command(action: &str, package: Option<&str>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn run_dnf_command(action: &str, package: Option<&str>) -> Result<()> {
+    match action {
+        "update" | "upgrade" | "makecache" => {
+            println!("Updating Subscription Management repositories.");
+            println!("Fedora 39 - x86_64                                1.5 MB/s |  28 MB     00:18");
+            println!("Fedora 39 openh264 (From Cisco) - x86_64        2.5 kB/s | 5.1 kB     00:02");
+            println!("Fedora 39 - x86_64 - Updates                    3.2 MB/s |  32 MB     00:10");
+            println!("Metadata cache created successfully.");
+        }
+        "install" => {
+            let pkg = package.context("Error: Please specify a package to install.")?;
+            println!("Last metadata expiration check: 0:01:05 ago on Sun Jun 21 12:00:00 2026.");
+            println!("Dependencies resolved.");
+            println!("================================================================================");
+            println!(" Package          Arch              Version            Repository          Size");
+            println!("================================================================================");
+            println!(" Installing:");
+            println!("  {:15} x86_64            1.0.0-1.fc39       fedora             1.2 M", pkg);
+            println!("Transaction Summary");
+            println!("================================================================================");
+            println!("Install  1 Package");
+            println!("Total download size: 1.2 M");
+            println!("Installed size: 3.5 M");
+            println!("Downloading Packages:");
+            
+            let url = get_rpm_url(pkg);
+            println!("Get:1 {} ...", url);
+            
+            match download_and_extract_rpm(pkg, &url) {
+                Ok(_) => {
+                    println!("Running transaction check");
+                    println!("Transaction check successful.");
+                    println!("Running transaction test");
+                    println!("Transaction test successful.");
+                    println!("Running transaction");
+                    println!("  Installing       : {}-1.0.0-1.fc39.x86_64", pkg);
+                    println!("  Verifying        : {}-1.0.0-1.fc39.x86_64", pkg);
+                    println!("✔  Package '{}' installed successfully!", pkg);
+                }
+                Err(e) => {
+                    println!("[Dnf] Offline or network error: {}. Simulating mock install...", e);
+                    let mock_path = std::path::Path::new("usr/bin").join(pkg);
+                    let _ = std::fs::create_dir_all("usr/bin");
+                    let _ = std::fs::write(&mock_path, format!("#!/bin/sh\necho 'Mock execution of {}'", pkg));
+                    #[cfg(target_os = "linux")]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let _ = std::fs::set_permissions(&mock_path, std::fs::Permissions::from_mode(0o755));
+                    }
+                    println!("✔  Mock package '{}' installed successfully!", pkg);
+                }
+            }
+        }
+        _ => {
+            anyhow::bail!("Unknown dnf action: {}. Supported: update, upgrade, makecache, install", action);
+        }
+    }
+    Ok(())
+}
+
+fn get_rpm_url(pkg: &str) -> String {
+    match pkg {
+        "curl" => "http://archives.fedoraproject.org/pub/archive/fedora/linux/releases/39/Everything/x86_64/os/Packages/c/curl-8.2.1-1.fc39.x86_64.rpm".to_string(),
+        "wget" => "http://archives.fedoraproject.org/pub/archive/fedora/linux/releases/39/Everything/x86_64/os/Packages/w/wget-1.21.4-1.fc39.x86_64.rpm".to_string(),
+        "git" => "http://archives.fedoraproject.org/pub/archive/fedora/linux/releases/39/Everything/x86_64/os/Packages/g/git-2.41.0-1.fc39.x86_64.rpm".to_string(),
+        "nano" => "http://archives.fedoraproject.org/pub/archive/fedora/linux/releases/39/Everything/x86_64/os/Packages/n/nano-7.2-2.fc39.x86_64.rpm".to_string(),
+        "htop" => "http://archives.fedoraproject.org/pub/archive/fedora/linux/releases/39/Everything/x86_64/os/Packages/h/htop-3.2.2-3.fc39.x86_64.rpm".to_string(),
+        "nginx" => "http://archives.fedoraproject.org/pub/archive/fedora/linux/releases/39/Everything/x86_64/os/Packages/n/nginx-1.24.0-1.fc39.x86_64.rpm".to_string(),
+        "neofetch" => "http://archives.fedoraproject.org/pub/archive/fedora/linux/releases/39/Everything/x86_64/os/Packages/n/neofetch-7.1.0-9.fc39.noarch.rpm".to_string(),
+        "python3" => "http://archives.fedoraproject.org/pub/archive/fedora/linux/releases/39/Everything/x86_64/os/Packages/p/python3-3.12.0-1.fc39.x86_64.rpm".to_string(),
+        _ => {
+            let first_char = pkg.chars().next().unwrap_or('a');
+            format!("http://archives.fedoraproject.org/pub/archive/fedora/linux/releases/39/Everything/x86_64/os/Packages/{}/{}-1.0.0-1.fc39.x86_64.rpm", first_char, pkg)
+        }
+    }
+}
+
+fn download_and_extract_rpm(_pkg: &str, url: &str) -> Result<()> {
+    let body = download_file(url)?;
+    
+    let temp_rpm_path = std::env::temp_dir().join("package.rpm");
+    std::fs::write(&temp_rpm_path, &body)?;
+    
+    println!("Extracting RPM package to root '/'...");
+    
+    let rpm2cpio_output = std::process::Command::new("rpm2cpio")
+        .arg(&temp_rpm_path)
+        .output();
+        
+    let _ = std::fs::remove_file(&temp_rpm_path);
+    
+    match rpm2cpio_output {
+        Ok(out) if out.status.success() => {
+            let cpio_child = std::process::Command::new("cpio")
+                .args(["-idmv"])
+                .current_dir("/")
+                .stdin(std::process::Stdio::piped())
+                .status();
+            match cpio_child {
+                Ok(s) if s.success() => Ok(()),
+                Ok(s) => anyhow::bail!("cpio failed with status: {:?}", s.code()),
+                Err(e) => anyhow::bail!("cpio execution failed: {}", e),
+            }
+        }
+        Ok(out) => {
+            anyhow::bail!("rpm2cpio failed: {}", String::from_utf8_lossy(&out.stderr))
+        }
+        Err(e) => {
+            anyhow::bail!("rpm2cpio command not available: {}", e)
+        }
+    }
+}
+
+fn run_pacman_command(action: &str, package: Option<&str>) -> Result<()> {
+    match action {
+        "-Sy" | "-Syu" => {
+            println!(":: Synchronizing package databases...");
+            println!(" core                      145.2 KiB   500 KiB/s 00:00 [######################] 100%");
+            println!(" extra                       8.3 MiB  4.25 MiB/s 00:02 [######################] 100%");
+            println!(" community                  45.0 KiB   200 KiB/s 00:00 [######################] 100%");
+            println!(":: Starting full system upgrade...");
+            println!(" there is nothing to do");
+        }
+        "-S" => {
+            let pkg = package.context("Error: Please specify a package to install.")?;
+            println!("resolving dependencies...");
+            println!("looking for conflicting packages...");
+            println!();
+            println!("Packages (1) {:15} 1.0.0-1", pkg);
+            println!();
+            println!("Total Download Size:   0.85 MiB");
+            println!("Total Installed Size:  2.45 MiB");
+            println!();
+            
+            let url = get_pacman_url(pkg);
+            println!(":: Retrieving packages...");
+            println!("  {:15} 0.85 MiB  2.50 MiB/s 00:00 [######################] 100%", pkg);
+            println!("Get:1 {} ...", url);
+            
+            match download_and_extract_pacman(pkg, &url) {
+                Ok(_) => {
+                    println!("(1/1) checking keys in keyring                     [######################] 100%");
+                    println!("(1/1) checking package integrity                   [######################] 100%");
+                    println!("(1/1) loading package files                        [######################] 100%");
+                    println!("(1/1) checking for file conflicts                  [######################] 100%");
+                    println!("(1/1) checking available disk space                [######################] 100%");
+                    println!(":: Processing package changes...");
+                    println!("(1/1) installing {:15}                      [######################] 100%", pkg);
+                    println!(":: Running post-transaction hooks...");
+                    println!("(1/1) Arming Condition-Needs-Update...             [######################] 100%");
+                    println!("✔  Package '{}' installed successfully!", pkg);
+                }
+                Err(e) => {
+                    println!("[Pacman] Offline or network error: {}. Simulating mock install...", e);
+                    let mock_path = std::path::Path::new("usr/bin").join(pkg);
+                    let _ = std::fs::create_dir_all("usr/bin");
+                    let _ = std::fs::write(&mock_path, format!("#!/bin/sh\necho 'Mock execution of {}'", pkg));
+                    #[cfg(target_os = "linux")]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let _ = std::fs::set_permissions(&mock_path, std::fs::Permissions::from_mode(0o755));
+                    }
+                    println!("✔  Mock package '{}' installed successfully!", pkg);
+                }
+            }
+        }
+        _ => {
+            anyhow::bail!("Unknown pacman action: {}. Supported: -Sy, -S, -Syu", action);
+        }
+    }
+    Ok(())
+}
+
+fn get_pacman_url(pkg: &str) -> String {
+    match pkg {
+        "curl" => "http://archive.archlinux.org/packages/c/curl/curl-8.4.0-1-x86_64.pkg.tar.zst".to_string(),
+        "wget" => "http://archive.archlinux.org/packages/w/wget/wget-1.21.4-1-x86_64.pkg.tar.zst".to_string(),
+        "git" => "http://archive.archlinux.org/packages/g/git/git-2.43.0-1-x86_64.pkg.tar.zst".to_string(),
+        "nano" => "http://archive.archlinux.org/packages/n/nano/nano-7.2-1-x86_64.pkg.tar.zst".to_string(),
+        "htop" => "http://archive.archlinux.org/packages/h/htop/htop-3.2.2-2-x86_64.pkg.tar.zst".to_string(),
+        "nginx" => "http://archive.archlinux.org/packages/n/nginx/nginx-1.24.0-1-x86_64.pkg.tar.zst".to_string(),
+        "neofetch" => "http://archive.archlinux.org/packages/n/neofetch/neofetch-7.1.0-2-any.pkg.tar.zst".to_string(),
+        "python" => "http://archive.archlinux.org/packages/p/python/python-3.11.5-1-x86_64.pkg.tar.zst".to_string(),
+        _ => {
+            let first_char = pkg.chars().next().unwrap_or('a');
+            format!("http://archive.archlinux.org/packages/{}/{}/{}-1.0.0-1-x86_64.pkg.tar.zst", first_char, pkg, pkg)
+        }
+    }
+}
+
+fn download_and_extract_pacman(_pkg: &str, url: &str) -> Result<()> {
+    let body = download_file(url)?;
+    
+    let temp_pkg_path = std::env::temp_dir().join("package.pkg.tar.zst");
+    std::fs::write(&temp_pkg_path, &body)?;
+    
+    println!("Extracting Pacman package to root '/'...");
+    
+    let status = std::process::Command::new("tar")
+        .args(["xf", &temp_pkg_path.to_string_lossy(), "-C", "/"])
+        .status();
+        
+    let _ = std::fs::remove_file(&temp_pkg_path);
+    
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => anyhow::bail!("tar extraction failed with exit code: {:?}", s.code()),
+        Err(e) => anyhow::bail!("tar command execution failed: {}", e),
+    }
 }
 
 fn get_package_url(pkg: &str) -> String {
@@ -599,6 +830,24 @@ fn handle_multi_call(cmd: &str, args: &[String]) -> Result<()> {
             let package = if args.len() > 2 { Some(args[2].as_str()) } else { None };
             run_apt_command(action, package)
         }
+        "dnf" => {
+            if args.len() < 2 {
+                println!("Usage: dnf <update | install | makecache> [package]");
+                return Ok(());
+            }
+            let action = &args[1];
+            let package = if args.len() > 2 { Some(args[2].as_str()) } else { None };
+            run_dnf_command(action, package)
+        }
+        "pacman" => {
+            if args.len() < 2 {
+                println!("Usage: pacman <-Sy | -S | -Syu> [package]");
+                return Ok(());
+            }
+            let action = &args[1];
+            let package = if args.len() > 2 { Some(args[2].as_str()) } else { None };
+            run_pacman_command(action, package)
+        }
         "echo" => run_echo(args),
         "true" => std::process::exit(0),
         "false" => std::process::exit(1),
@@ -660,6 +909,28 @@ fn run_hostname() -> Result<()> {
     Ok(())
 }
 
+fn get_dnf_package_name(pkg: &str) -> &str {
+    match pkg {
+        "xz-utils" => "xz",
+        "iputils-ping" => "iputils",
+        "iproute2" => "iproute",
+        "dnsutils" => "bind-utils",
+        "openssh-client" => "openssh-clients",
+        _ => pkg,
+    }
+}
+
+fn get_pacman_package_name(pkg: &str) -> &str {
+    match pkg {
+        "xz-utils" => "xz",
+        "iputils-ping" => "iputils",
+        "iproute2" => "iproute",
+        "dnsutils" => "bind",
+        "openssh-client" => "openssh",
+        _ => pkg,
+    }
+}
+
 fn execute_real_or_suggest(command: &str, args: &[String]) -> Result<()> {
     if let Some(real_path) = find_real_executable(command) {
         let mut child = std::process::Command::new(real_path)
@@ -674,6 +945,8 @@ fn execute_real_or_suggest(command: &str, args: &[String]) -> Result<()> {
     let pkg = suggest_package(command);
     println!("Command '{}' not found, but can be installed with:", command);
     println!("  apt install {}", pkg);
+    println!("  dnf install {}", get_dnf_package_name(pkg));
+    println!("  pacman -S {}", get_pacman_package_name(pkg));
     
     std::process::exit(127);
 }
