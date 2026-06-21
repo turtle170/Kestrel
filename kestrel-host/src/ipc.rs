@@ -44,24 +44,35 @@ pub fn spawn_terminal() {
 // ─── WHPX I/O Port Handler ───────────────────────────────────────────────────
 
 /// Handle an I/O port access exit delivered by the WHPX virtual processor.
-/// In a full implementation this would bridge COM1 to a named pipe read by kestrel-term.
 #[cfg(target_os = "windows")]
 pub fn handle_io_port(ctx: WHV_X64_IO_PORT_ACCESS_CONTEXT) {
     let port = ctx.PortNumber;
-    debug!("[IPC] I/O port access: 0x{:04x}", port);
 
     match port {
         // COM1 UART data register — route serial output to Kestrel terminal pipe
         0x3F8 => {
-            // TODO: write ctx.Rax low byte to \\.\pipe\kestrel-serial
-            debug!("[IPC] COM1 TX byte (stub)");
+            let is_write = (unsafe { ctx.AccessInfo.AsUINT32 } & 0x20) != 0;
+            if is_write {
+                let byte = (ctx.Rax & 0xFF) as u8;
+                let mut written = false;
+                if let Ok(mut guard) = SERIAL_PIPE_STREAM.lock() {
+                    if let Some(ref mut file) = *guard {
+                        if file.write_all(&[byte]).is_ok() && file.flush().is_ok() {
+                            written = true;
+                        }
+                    }
+                }
+                
+                // Throttle guest execution
+                if !written {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                } else {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            }
         }
         // ISA debug port — safe to ignore
         0x0080 => {}
-        // COM2 data register
-        0x2F8 => {
-            debug!("[IPC] COM2 TX byte (stub)");
-        }
         _ => {
             debug!("[IPC] Unhandled I/O port 0x{:04x}", port);
         }
@@ -144,6 +155,7 @@ pub fn send_hatch_request(app: PathBuf, volumes: Vec<String>) -> Result<()> {
 
 /// Run by the main `kestrel-host` daemon to listen for Hatchling commands from the CLI.
 pub fn start_control_listener() {
+    start_serial_server();
     // 1. Spawn TCP control socket server for Kestrel guest (kestrel-init)
     thread::spawn(|| {
         info!("[IPC] Guest control TCP server starting on {}", CONTROL_PORT);
@@ -269,3 +281,71 @@ pub fn start_control_listener() {
         }
     });
 }
+
+// ─── Serial Named Pipe Server ────────────────────────────────────────────────
+
+static SERIAL_PIPE_STREAM: std::sync::Mutex<Option<std::fs::File>> = std::sync::Mutex::new(None);
+
+#[cfg(target_os = "windows")]
+pub fn start_serial_server() {
+    thread::spawn(|| {
+        use windows::core::HSTRING;
+        use windows::Win32::System::Pipes::{CreateNamedPipeW, PIPE_TYPE_BYTE, PIPE_READMODE_BYTE, PIPE_WAIT, ConnectNamedPipe, DisconnectNamedPipe};
+        use windows::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
+        use windows::Win32::Foundation::{GetLastError, ERROR_PIPE_CONNECTED};
+        use std::os::windows::io::FromRawHandle;
+
+        let pipe_name = HSTRING::from(r"\\.\pipe\KestrelSerial");
+        unsafe {
+            loop {
+                let pipe = CreateNamedPipeW(
+                    &pipe_name,
+                    PIPE_ACCESS_DUPLEX,
+                    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                    1, // Max instances
+                    4096,
+                    4096,
+                    0,
+                    None,
+                );
+                
+                if pipe.is_invalid() {
+                    thread::sleep(std::time::Duration::from_millis(500));
+                    continue;
+                }
+                
+                let connected = ConnectNamedPipe(pipe, None);
+                if connected.is_ok() || GetLastError() == ERROR_PIPE_CONNECTED {
+                    info!("[IPC] Kestrel terminal connected to serial pipe");
+                    
+                    let file = std::fs::File::from_raw_handle(pipe.0 as *mut std::ffi::c_void);
+                    
+                    if let Ok(mut guard) = SERIAL_PIPE_STREAM.lock() {
+                        *guard = Some(file.try_clone().unwrap());
+                    }
+                    
+                    let mut file_read = file;
+                    let mut buf = [0u8; 1024];
+                    loop {
+                        use std::io::Read;
+                        match file_read.read(&mut buf) {
+                            Ok(0) => break,
+                            Ok(_) => {}
+                            Err(_) => break,
+                        }
+                    }
+                    
+                    info!("[IPC] Kestrel terminal disconnected from serial pipe");
+                }
+                
+                if let Ok(mut guard) = SERIAL_PIPE_STREAM.lock() {
+                    *guard = None;
+                }
+                let _ = DisconnectNamedPipe(pipe);
+            }
+        }
+    });
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn start_serial_server() {}

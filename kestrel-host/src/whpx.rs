@@ -338,7 +338,13 @@ fn run_loop(partition: WHV_PARTITION_HANDLE) -> Result<()> {
                 break;
             }
             WHvRunVpExitReasonX64IoPortAccess => {
-                crate::ipc::handle_io_port(unsafe { exit_context.Anonymous.IoPortAccess });
+                let io_context = unsafe { exit_context.Anonymous.IoPortAccess };
+                crate::ipc::handle_io_port(io_context);
+
+                // Advance RIP to skip the emulated instruction
+                let mut rip = get_register(partition, WHvX64RegisterRip)?;
+                rip += (exit_context.VpContext._bitfield & 0x0F) as u64;
+                set_register(partition, WHvX64RegisterRip, rip)?;
             }
             WHvRunVpExitReasonMemoryAccess => {
                 let gpa = unsafe { exit_context.Anonymous.MemoryAccess.Gpa };
@@ -355,4 +361,35 @@ fn run_loop(partition: WHV_PARTITION_HANDLE) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn get_register(partition: WHV_PARTITION_HANDLE, name: WHV_REGISTER_NAME) -> Result<u64> {
+    let mut value = WHV_REGISTER_VALUE::default();
+    unsafe {
+        WHvGetVirtualProcessorRegisters(
+            partition,
+            0,
+            &name,
+            1,
+            &mut value,
+        ).context("Failed to get virtual processor register")?;
+        Ok(value.Reg64)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn set_register(partition: WHV_PARTITION_HANDLE, name: WHV_REGISTER_NAME, val: u64) -> Result<()> {
+    let mut value = WHV_REGISTER_VALUE::default();
+    value.Reg64 = val;
+    unsafe {
+        WHvSetVirtualProcessorRegisters(
+            partition,
+            0,
+            &name,
+            1,
+            &value,
+        ).context("Failed to set virtual processor register")?;
+        Ok(())
+    }
 }

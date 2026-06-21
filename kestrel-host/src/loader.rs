@@ -24,14 +24,33 @@ pub fn load_kernel(guest_mem: *mut std::ffi::c_void, guest_mem_size: usize) -> R
             "[Loader] Kernel image not found at {:?} — running in stub mode",
             kernel_path
         );
-        // Write a single HLT (0xF4) at KERNEL_LOAD_ADDR so the VM exits cleanly.
         let offset = crate::KERNEL_LOAD_ADDR as usize;
         if offset >= guest_mem_size {
             bail!("KERNEL_LOAD_ADDR exceeds guest memory size");
         }
+        
+        let mut stub = Vec::new();
+        // mov dx, 0x3F8
+        stub.extend_from_slice(&[0xBA, 0xF8, 0x03]);
+        
+        let msg = b"Kestrel OS Stub Mode (No Kernel Image). Press Ctrl+Q to exit.\r\n";
+        for &byte in msg {
+            // mov al, byte
+            stub.extend_from_slice(&[0xB0, byte]);
+            // out dx, al
+            stub.push(0xEE);
+        }
+        // jmp loop (relative offset: 1 - stub.len())
+        let rel = (1 - (stub.len() as isize)) as u8;
+        stub.extend_from_slice(&[0xEB, rel]);
+        
+        if offset + stub.len() > guest_mem_size {
+            bail!("Loader stub exceeds guest memory size");
+        }
+        
         unsafe {
-            let entry = (guest_mem as *mut u8).add(offset);
-            *entry = 0xF4; // HLT opcode
+            let dest = (guest_mem as *mut u8).add(offset);
+            std::ptr::copy_nonoverlapping(stub.as_ptr(), dest, stub.len());
         }
         return Ok(offset);
     }
