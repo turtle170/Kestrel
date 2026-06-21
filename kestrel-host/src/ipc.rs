@@ -54,7 +54,7 @@ pub fn handle_io_port(ctx: WHV_X64_IO_PORT_ACCESS_CONTEXT) -> Option<u32> {
             let is_write = (unsafe { ctx.AccessInfo.AsUINT32 } & 0x01) != 0;
             if is_write {
                 let byte = (ctx.Rax & 0xFF) as u8;
-                info!("[IPC] COM1 TX: '{}' ({})", byte as char, byte);
+                debug!("[IPC] COM1 TX: '{}' ({})", byte as char, byte);
                 let mut written = false;
                 if let Ok(mut guard) = SERIAL_PIPE_STREAM.lock() {
                     if let Some(ref mut file) = *guard {
