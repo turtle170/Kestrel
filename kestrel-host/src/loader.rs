@@ -35,22 +35,71 @@ pub fn load_kernel(guest_mem: *mut std::ffi::c_void, guest_mem_size: usize) -> R
         
         let msg = b"Kestrel OS Stub Mode (No Kernel Image). Type anything to echo. Press Ctrl+Q to exit.\r\n";
         for &byte in msg {
-            // mov al, byte
-            stub.extend_from_slice(&[0xB0, byte]);
-            // out dx, al
-            stub.push(0xEE);
+            stub.extend_from_slice(&[0xB0, byte, 0xEE]);
         }
-        // Echo loop
-        stub.extend_from_slice(&[
-            0xBA, 0xFD, 0x03, // mov dx, 0x3FD
-            0xEC,             // in al, dx
-            0xA8, 0x01,       // test al, 0x01
-            0x74, 0xFB,       // jz wait_rx (jump to in al, dx)
-            0xBA, 0xF8, 0x03, // mov dx, 0x3F8
-            0xEC,             // in al, dx
-            0xEE,             // out dx, al
-            0xEB, 0xF1,       // jmp echo_loop (jump to mov dx, 0x3FD)
-        ]);
+        
+        // Print initial prompt
+        let initial_prompt = b"[kestrel-stub /]> ";
+        for &byte in initial_prompt {
+            stub.extend_from_slice(&[0xB0, byte, 0xEE]);
+        }
+
+        let wait_rx_offset = stub.len();
+        
+        // mov dx, 0x3FD
+        stub.extend_from_slice(&[0xBA, 0xFD, 0x03]);
+        // in al, dx
+        stub.push(0xEC);
+        // test al, 0x01
+        stub.extend_from_slice(&[0xA8, 0x01]);
+        
+        // jz wait_rx
+        let jz_instr_offset = stub.len();
+        let target_offset = wait_rx_offset as isize - (jz_instr_offset as isize + 2);
+        stub.extend_from_slice(&[0x74, target_offset as u8]);
+
+        // mov dx, 0x3F8
+        stub.extend_from_slice(&[0xBA, 0xF8, 0x03]);
+        // in al, dx
+        stub.push(0xEC);
+        
+        // cmp al, 13 (\r)
+        stub.extend_from_slice(&[0x3C, 13]);
+        
+        // je handle_enter (0x74, rel8)
+        let je_instr_offset = stub.len();
+        stub.extend_from_slice(&[0x74, 0x00]); // Placeholder
+
+        // Echo path (characters other than \r)
+        // out dx, al
+        stub.push(0xEE);
+        // jmp wait_rx
+        let jmp_wait_rx_offset = stub.len();
+        let target_offset = wait_rx_offset as isize - (jmp_wait_rx_offset as isize + 2);
+        stub.extend_from_slice(&[0xEB, target_offset as u8]);
+
+        // Label: handle_enter
+        let handle_enter_offset = stub.len();
+        let je_target = handle_enter_offset as isize - (je_instr_offset as isize + 2);
+        stub[je_instr_offset + 1] = je_target as u8;
+
+        // handle_enter code:
+        // out dx, al (echo '\r')
+        stub.push(0xEE);
+        // mov al, 10 (\n)
+        stub.extend_from_slice(&[0xB0, 10]);
+        // out dx, al
+        stub.push(0xEE);
+        
+        // print prompt
+        for &byte in initial_prompt {
+            stub.extend_from_slice(&[0xB0, byte, 0xEE]);
+        }
+        
+        // jmp wait_rx
+        let final_jmp_offset = stub.len();
+        let target_offset = wait_rx_offset as isize - (final_jmp_offset as isize + 2);
+        stub.extend_from_slice(&[0xEB, target_offset as u8]);
         
         if offset + stub.len() > guest_mem_size {
             bail!("Loader stub exceeds guest memory size");
