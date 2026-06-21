@@ -45,15 +45,14 @@ pub fn run(boot_mode: crate::BootMode) -> Result<()> {
 
         info!("[WHPX] Setting up partition properties...");
 
-        // Set processor count = 1  (WHvPartitionPropertyCodeProcessorCount = 1)
-        let mut prop = WHV_PARTITION_PROPERTY::default();
+        // Set processor count = 1
+        let processor_count: u32 = 1;
         unsafe {
-            prop.ProcessorCount = 1;
             WHvSetPartitionProperty(
                 partition,
-                WHV_PARTITION_PROPERTY_CODE(1),
-                &prop as *const _ as *const std::ffi::c_void,
-                std::mem::size_of::<WHV_PARTITION_PROPERTY>() as u32,
+                WHvPartitionPropertyCodeProcessorCount,
+                &processor_count as *const u32 as *const std::ffi::c_void,
+                std::mem::size_of::<u32>() as u32,
             )
         }
         .context("Failed to set processor count")?;
@@ -83,7 +82,7 @@ pub fn run(boot_mode: crate::BootMode) -> Result<()> {
             WHvMapGpaRange(
                 partition,
                 host_mem,
-                crate::KERNEL_LOAD_ADDR,
+                0, // Guest physical memory starts at GPA 0
                 crate::GUEST_MEMORY_SIZE as u64,
                 WHV_MAP_GPA_RANGE_FLAGS(7),
             )
@@ -157,21 +156,23 @@ pub fn run(boot_mode: crate::BootMode) -> Result<()> {
 
 #[cfg(target_os = "windows")]
 fn setup_vcpu_registers(partition: WHV_PARTITION_HANDLE) -> Result<()> {
-    // WHV_REGISTER_NAME numeric values (from WinHvPlatformDefs.h):
-    //   Rip    = 0x00000040
-    //   Rflags = 0x00000041
-    //   Rsp    = 0x00000044
-    // WHV_REGISTER_NAME inner type is i32 in windows-rs 0.62
     let reg_names = [
-        WHV_REGISTER_NAME(0x00000040i32), // Rip
-        WHV_REGISTER_NAME(0x00000041i32), // Rflags
-        WHV_REGISTER_NAME(0x00000044i32), // Rsp
+        WHvX64RegisterRip,
+        WHvX64RegisterRflags,
+        WHvX64RegisterRsp,
+        WHvX64RegisterCs,
     ];
-    let mut reg_values = [WHV_REGISTER_VALUE::default(); 3];
+    let mut reg_values = [WHV_REGISTER_VALUE::default(); 4];
     unsafe {
-        reg_values[0].Reg64 = crate::KERNEL_LOAD_ADDR; // RIP = kernel load address
-        reg_values[1].Reg64 = 0x0002; // RFLAGS: reserved bit 1 set (always required)
+        reg_values[0].Reg64 = 0x0010; // RIP = 16 (since CS base is 0xFFFF0, 0xFFFF0 + 16 = 0x100000 / 1MB)
+        reg_values[1].Reg64 = 0x0002; // RFLAGS
         reg_values[2].Reg64 = (crate::GUEST_MEMORY_SIZE - 0x1000) as u64; // RSP
+
+        // CS flat segment descriptor for Real Mode 1MB boot
+        reg_values[3].Segment.Base = 0xFFFF0;
+        reg_values[3].Segment.Limit = 0xFFFF;
+        reg_values[3].Segment.Selector = 0xFFFF;
+        reg_values[3].Segment.Anonymous.Attributes = 0x009B;
 
         WHvSetVirtualProcessorRegisters(
             partition,
@@ -188,9 +189,9 @@ fn setup_vcpu_registers(partition: WHV_PARTITION_HANDLE) -> Result<()> {
 #[cfg(target_os = "windows")]
 fn set_vcpu_registers(partition: WHV_PARTITION_HANDLE, cpu: &crate::snapshot::CpuSnapshot) -> Result<()> {
     let reg_names = [
-        WHV_REGISTER_NAME(0x00000040i32), // Rip
-        WHV_REGISTER_NAME(0x00000041i32), // Rflags
-        WHV_REGISTER_NAME(0x00000044i32), // Rsp
+        WHvX64RegisterRip,
+        WHvX64RegisterRflags,
+        WHvX64RegisterRsp,
         WHvX64RegisterRax,
         WHvX64RegisterRbx,
         WHvX64RegisterRcx,
@@ -254,9 +255,9 @@ fn set_vcpu_registers(partition: WHV_PARTITION_HANDLE, cpu: &crate::snapshot::Cp
 #[cfg(target_os = "windows")]
 fn get_vcpu_registers(partition: WHV_PARTITION_HANDLE) -> Result<crate::snapshot::CpuSnapshot> {
     let reg_names = [
-        WHV_REGISTER_NAME(0x00000040i32), // Rip
-        WHV_REGISTER_NAME(0x00000041i32), // Rflags
-        WHV_REGISTER_NAME(0x00000044i32), // Rsp
+        WHvX64RegisterRip,
+        WHvX64RegisterRflags,
+        WHvX64RegisterRsp,
         WHvX64RegisterRax,
         WHvX64RegisterRbx,
         WHvX64RegisterRcx,
@@ -316,6 +317,7 @@ fn get_vcpu_registers(partition: WHV_PARTITION_HANDLE) -> Result<crate::snapshot
 }
 
 #[cfg(target_os = "windows")]
+#[allow(non_upper_case_globals)]
 fn run_loop(partition: WHV_PARTITION_HANDLE) -> Result<()> {
     let mut exit_context = WHV_RUN_VP_EXIT_CONTEXT::default();
 
@@ -331,22 +333,19 @@ fn run_loop(partition: WHV_PARTITION_HANDLE) -> Result<()> {
         .context("WHvRunVirtualProcessor failed")?;
 
         match exit_context.ExitReason {
-            // WHvRunVpExitReasonX64Halt = 0x00000000
-            WHV_RUN_VP_EXIT_REASON(0x00000000) => {
+            WHvRunVpExitReasonX64Halt => {
                 info!("[WHPX] Guest halted (HLT). Exiting.");
                 break;
             }
-            // WHvRunVpExitReasonX64IoPortAccess = 0x00001000
-            WHV_RUN_VP_EXIT_REASON(0x00001000) => {
-                // IoPortAccess lives in the Anonymous union field
+            WHvRunVpExitReasonX64IoPortAccess => {
                 crate::ipc::handle_io_port(unsafe { exit_context.Anonymous.IoPortAccess });
             }
-            // WHvRunVpExitReasonMemoryAccess = 0x00000001
-            WHV_RUN_VP_EXIT_REASON(0x00000001) => {
-                warn!("[WHPX] Memory access exit — unhandled GPA");
+            WHvRunVpExitReasonMemoryAccess => {
+                let gpa = unsafe { exit_context.Anonymous.MemoryAccess.Gpa };
+                warn!("[WHPX] Memory access exit — unhandled GPA: 0x{:016x}", gpa);
+                bail!("WHPX guest crashed: unhandled GPA access");
             }
-            // WHvRunVpExitReasonCanceled = 0x00002001
-            WHV_RUN_VP_EXIT_REASON(0x00002001) => {
+            WHvRunVpExitReasonCanceled => {
                 info!("[WHPX] Execution cancelled. Exiting.");
                 break;
             }
